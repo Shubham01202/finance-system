@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+/* CTO Theme Colors */
+:root {
+  --color-primary: #0B3C5D;
+  --color-accent: #1D4ED8;
+  --color-background: #F4F6F9;
+}
+
+body {
+  background-color: var(--color-background);
+  color: #1f2937;
+}
