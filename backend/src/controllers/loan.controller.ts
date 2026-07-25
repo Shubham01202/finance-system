@@ -292,7 +292,7 @@ export const updateApplication = async (req: AuthRequest, res: Response) => {
     console.error("Update Application Error:", error);
     return res.status(500).json({ success: false, message: "Server error." });
   }
-};
+}; 
 
 /* ─────────────────────────────────────────────
    GET BANKS
