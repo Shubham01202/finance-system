@@ -6,16 +6,19 @@ import nodemailer from "nodemailer";
    TRANSPORTER
 ───────────────────────────────────────────── */
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT),
-  secure: false,
+  host: process.env.SMTP_HOST?.trim(),
+  port: parseInt(process.env.SMTP_PORT?.trim(), 10),
+  secure: process.env.SMTP_PORT?.trim() === '465',
   auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
+    user: process.env.SMTP_USER?.trim(),
+    pass: process.env.SMTP_PASS?.trim(),
   },
-  connectionTimeout: 30000,
-  greetingTimeout: 30000,
-  socketTimeout: 30000,
+  connectionTimeout: 10000, // 10s instead of default (often 2 min), fails fast for debugging
+});
+
+transporter.verify((err, success) => {
+  if (err) console.error('SMTP verify failed:', err);
+  else console.log('SMTP server is ready to take messages');
 });
 
 transporter.verify((error, success) => {
