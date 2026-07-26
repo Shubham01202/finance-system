@@ -396,6 +396,8 @@ interface BrevoEmailPayload {
 }
 
 async function sendViaBrevo({ to, subject, html }: BrevoEmailPayload): Promise<void> {
+  console.log("BREVO_API_KEY present:", Boolean(process.env.BREVO_API_KEY));
+console.log("SMTP_FROM value:", process.env.SMTP_FROM);
   const response = await fetch("https://api.brevo.com/v3/smtp/email", {
     method: "POST",
     headers: {
