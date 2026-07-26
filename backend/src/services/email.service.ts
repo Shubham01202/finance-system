@@ -395,9 +395,15 @@ interface BrevoEmailPayload {
   html: string;
 }
 
+function parseSenderEmail(raw: string | undefined): string {
+  if (!raw) return "";
+  const match = raw.match(/<([^>]+)>/);
+  return (match ? match[1] : raw).trim();
+}
+
 async function sendViaBrevo({ to, subject, html }: BrevoEmailPayload): Promise<void> {
-  console.log("BREVO_API_KEY present:", Boolean(process.env.BREVO_API_KEY));
-console.log("SMTP_FROM value:", process.env.SMTP_FROM);
+  const senderEmail = parseSenderEmail(process.env.SMTP_FROM);
+
   const response = await fetch("https://api.brevo.com/v3/smtp/email", {
     method: "POST",
     headers: {
@@ -407,7 +413,7 @@ console.log("SMTP_FROM value:", process.env.SMTP_FROM);
     },
     body: JSON.stringify({
       sender: {
-        email: process.env.SMTP_FROM,
+        email: senderEmail,
         name: "SN Finance Service",
       },
       to: [{ email: to }],
@@ -421,7 +427,7 @@ console.log("SMTP_FROM value:", process.env.SMTP_FROM);
     console.error("Brevo API error:", errorBody);
     throw new Error(`Brevo API error: ${JSON.stringify(errorBody)}`);
   }
-}
+} 
 
 /* ─────────────────────────────────────────────
    OTP EMAIL TEMPLATE
