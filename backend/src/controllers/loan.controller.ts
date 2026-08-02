@@ -179,6 +179,8 @@ export const getApplicationById = async (req: AuthRequest, res: Response) => {
    UPDATE APPLICATION — customer (pending only)
 ───────────────────────────────────────────── */
 
+// These must match the DocKey values used on the frontend
+// (the field names the frontend appends new files under via FormData).
 const DOC_KEYS = [
   "pan_aadhaar", "bank_statement", "passport_photo", "co_applicant_kyc",
   "salary_slip", "itr_3years", "electricity_bill", "gst_registration",
@@ -221,6 +223,11 @@ export const updateApplication = async (req: AuthRequest, res: Response) => {
       }
     }
 
+    /* ── Merge newly uploaded replacement files into existing documents ──
+       upload.any() puts all uploaded files into req.files as an array.
+       Each file's `fieldname` is the DocKey the frontend appended it under
+       (e.g. fd.append("pan_aadhaar", file)). We only touch keys that were
+       actually re-uploaded; everything else in the existing JSON stays as-is. */
     const existingDocuments =
       existing.rows[0].documents && typeof existing.rows[0].documents === "object"
         ? existing.rows[0].documents
@@ -231,6 +238,7 @@ export const updateApplication = async (req: AuthRequest, res: Response) => {
     const uploadedFiles = (req.files as Express.Multer.File[]) || [];
 
     uploadedFiles.forEach((file) => {
+      // Only accept files whose fieldname matches a known document slot
       if (!DOC_KEYS.includes(file.fieldname)) return;
 
       mergedDocuments[file.fieldname] = {
@@ -281,6 +289,7 @@ export const updateApplication = async (req: AuthRequest, res: Response) => {
       ]
     );
 
+    // Return the fresh documents so the frontend can update its state immediately
     const savedDocuments = updateResult.rows[0]?.documents || mergedDocuments;
 
     return res.json({
@@ -292,7 +301,7 @@ export const updateApplication = async (req: AuthRequest, res: Response) => {
     console.error("Update Application Error:", error);
     return res.status(500).json({ success: false, message: "Server error." });
   }
-}; 
+};
 
 /* ─────────────────────────────────────────────
    GET BANKS
@@ -313,23 +322,48 @@ export const getBanks = async (req: AuthRequest, res: Response) => {
 export const getProfile = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.id;
+
     if (!userId) {
-      return res.status(401).json({ success: false, message: "Authentication required." });
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
+      });
     }
 
     const result = await pool.query(
-      `SELECT id, full_name, email, mobile, role, created_at FROM users WHERE id = $1`,
+      `
+      SELECT
+        id,
+        full_name,
+        email,
+        mobile,
+        role,
+        created_at
+      FROM users
+      WHERE id = $1
+      `,
       [userId]
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ success: false, message: "User not found." });
+      return res.status(404).json({
+        success: false,
+        message: "User not found.",
+      });
     }
 
-    return res.json({ success: true, data: result.rows[0] });
+    return res.json({
+      success: true,
+      data: result.rows[0],
+    });
+
   } catch (error) {
     console.error("Get Profile Error:", error);
-    return res.status(500).json({ success: false, message: "Server error." });
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error.",
+    });
   }
 };
 
@@ -339,25 +373,64 @@ export const getProfile = async (req: AuthRequest, res: Response) => {
 export const updateProfile = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.id;
+
     if (!userId) {
-      return res.status(401).json({ success: false, message: "Authentication required." });
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
+      });
     }
 
-    const { full_name, email, mobile } = req.body;
+    const {
+      full_name,
+      email,
+      mobile,
+    } = req.body;
 
     await pool.query(
-      `UPDATE users SET full_name = $1, email = $2, mobile = $3 WHERE id = $4`,
-      [full_name, email, mobile, userId]
+      `
+      UPDATE users
+      SET
+        full_name = $1,
+        email = $2,
+        mobile = $3
+      WHERE id = $4
+      `,
+      [
+        full_name,
+        email,
+        mobile,
+        userId,
+      ]
     );
 
     const updated = await pool.query(
-      `SELECT id, full_name, email, mobile, role, created_at FROM users WHERE id = $1`,
+      `
+      SELECT
+        id,
+        full_name,
+        email,
+        mobile,
+        role,
+        created_at
+      FROM users
+      WHERE id = $1
+      `,
       [userId]
     );
 
-    return res.json({ success: true, message: "Profile updated successfully.", data: updated.rows[0] });
+    return res.json({
+      success: true,
+      message: "Profile updated successfully.",
+      data: updated.rows[0],
+    });
+
   } catch (error) {
     console.error("Update Profile Error:", error);
-    return res.status(500).json({ success: false, message: "Server error." });
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error.",
+    });
   }
 };
