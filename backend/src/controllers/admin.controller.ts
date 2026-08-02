@@ -5,9 +5,17 @@ import bcrypt from "bcrypt";
 import {
   sendOtpEmail,
   sendSetupPasswordEmail,
+  sendApplicationToBankerEmail,
 } from "../services/email.service";
 
 import crypto from "crypto";
+import fs from "fs";
+import path from "path";
+import JSZip from "jszip";
+
+// NOTE: adjust this if your uploads folder lives somewhere else.
+// This assumes: backend/uploads  and  documents.filePath is stored like "uploads/xxx.pdf"
+const UPLOAD_ROOT = path.join(__dirname, "../../");
 
 const setupToken = crypto.randomBytes(32).toString("hex");
 
@@ -228,10 +236,112 @@ export const updateApplicationStatus = async (
       );
     }
 
-    return res.json({ message: "Status updated successfully" });
+   return res.json({ message: "Status updated successfully" });
   } catch (err) {
     console.error("updateApplicationStatus error:", err);
     return res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const sendApplicationToBanker = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { email, subject } = req.body;
+
+    if (!email || !email.trim() || !subject || !subject.trim()) {
+      return res.status(400).json({ message: "Email and subject are required" });
+    }
+
+    const result = await pool.query(
+      `
+      SELECT
+        la.*,
+        u.full_name AS user_name,
+        b.bank_name AS bank_name
+      FROM loan_applications la
+      LEFT JOIN users u ON la.user_id = u.id
+      LEFT JOIN banks b ON la.bank_id = b.id
+      WHERE la.id = $1
+      `,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Application not found" });
+    }
+
+    const application = result.rows[0];
+
+    if ((application.status || "").toLowerCase() !== "approved") {
+      return res.status(400).json({
+        message: "Only approved applications can be sent to bankers",
+      });
+    }
+
+  // Build a single zip attachment from the documents jsonb column
+    const documentNames: string[] = [];
+    const documents = application.documents || {};
+
+    const filesToZip: { absolutePath: string; zipEntryName: string }[] = [];
+
+    for (const key of Object.keys(documents)) {
+      const doc = documents[key];
+      if (!doc?.filePath) continue;
+
+      const cleanPath = String(doc.filePath).replace(/^\/+/, "");
+      const absolutePath = path.join(UPLOAD_ROOT, cleanPath);
+
+      documentNames.push(doc.name || key);
+
+      if (fs.existsSync(absolutePath)) {
+        const ext = path.extname(absolutePath);
+        const baseName = doc.name ? doc.name.replace(ext, "") : key;
+        filesToZip.push({
+          absolutePath,
+          zipEntryName: `${key}_${baseName}${ext}`,
+        });
+      } else {
+        console.warn(`sendApplicationToBanker: file not found on disk -> ${absolutePath}`);
+      }
+    }
+
+    // Build the zip in memory
+    const zip = new JSZip();
+
+    for (const file of filesToZip) {
+      const fileBuffer = fs.readFileSync(file.absolutePath);
+      zip.file(file.zipEntryName, fileBuffer);
+    }
+
+    const zipBuffer: Buffer = await zip.generateAsync({
+      type: "nodebuffer",
+      compression: "DEFLATE",
+      compressionOptions: { level: 9 },
+    });
+
+    const zipAttachment = {
+      filename: `application_${application.application_number || id}_documents.zip`,
+      content: zipBuffer,
+    };
+
+    await sendApplicationToBankerEmail(
+      email.trim(),
+      subject.trim(),
+      application,
+      documentNames,
+      [zipAttachment]
+    );
+
+    return res.json({
+      success: true,
+      message: "Application details sent to banker successfully",
+    });
+  } catch (err) {
+    console.error("sendApplicationToBanker error:", err);
+    return res.status(500).json({
+      message: "Failed to send application to banker",
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 };
 

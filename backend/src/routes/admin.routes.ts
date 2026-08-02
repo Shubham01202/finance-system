@@ -4,6 +4,7 @@ import {
   getAllApplications,
   getApplicationById,
   updateApplicationStatus,
+  sendApplicationToBanker,
   getAllUsers,
   getUserById,
   updateUser,
@@ -53,6 +54,12 @@ router.put(
   "/applications/:id",
   adminAuth,
   updateApplicationStatus
+);
+
+router.post(
+  "/applications/:id/send-to-banker",
+  adminAuth,
+  sendApplicationToBanker
 );
 
 router.put(

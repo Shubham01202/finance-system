@@ -1,0 +1,82 @@
+import { Request, Response } from "express";
+import { pool } from "../config/db";
+
+export const getPublicLoanServices = async (req: Request, res: Response) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, name FROM loan_services WHERE is_active = true ORDER BY name ASC`
+    );
+    return res.json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error("getPublicLoanServices error:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+export const getPublicEmploymentTypes = async (req: Request, res: Response) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, name FROM employment_types WHERE is_active = true ORDER BY name ASC`
+    );
+    return res.json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error("getPublicEmploymentTypes error:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+export const getPublicStates = async (req: Request, res: Response) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, state_name, state_code FROM states WHERE is_active = true ORDER BY state_name ASC`
+    );
+    return res.json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error("getPublicStates error:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+export const getPublicLoanTenures = async (req: Request, res: Response) => {
+  try {
+    const { loan_service_id } = req.query;
+    if (!loan_service_id) {
+      return res.status(400).json({ success: false, message: "loan_service_id is required" });
+    }
+    const result = await pool.query(
+      `
+      SELECT id, tenure_months, display_name
+      FROM loan_tenures
+      WHERE loan_service_id = $1 AND is_active = true
+      ORDER BY tenure_months ASC
+      `,
+      [loan_service_id]
+    );
+    return res.json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error("getPublicLoanTenures error:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+export const getPublicDocumentTypes = async (req: Request, res: Response) => {
+  try {
+    const { loan_service_id } = req.query;
+    if (!loan_service_id) {
+      return res.status(400).json({ success: false, message: "loan_service_id is required" });
+    }
+    const result = await pool.query(
+      `
+      SELECT id, document_name, is_required, max_size_mb, allowed_file_types
+      FROM document_types
+      WHERE loan_service_id = $1 AND is_active = true
+      ORDER BY id ASC
+      `,
+      [loan_service_id]
+    );
+    return res.json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error("getPublicDocumentTypes error:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};

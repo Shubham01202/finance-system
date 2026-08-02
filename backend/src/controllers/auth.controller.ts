@@ -536,3 +536,132 @@ export const setPasswordFromLink = async (
     });
   }
 };
+
+/* ═══════════════════════════════════════════
+   ROLES — manage which roles exist (label only,
+   used to populate users.role on create/edit)
+═══════════════════════════════════════════ */
+
+export const getRoles = async (req: Request, res: Response) => {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM roles ORDER BY role_name ASC`
+    );
+
+    return res.json({
+      success: true,
+      data: result.rows,
+    });
+  } catch (error) {
+    console.error("getRoles error:", error);
+    return res.status(500).json({
+      error: "Internal Server Error",
+    });
+  }
+};
+
+export const createRole = async (req: Request, res: Response) => {
+  try {
+    const { role_name, description } = req.body;
+
+    if (!role_name || !role_name.trim()) {
+      return res.status(400).json({
+        error: "Role name is required",
+      });
+    }
+
+    const existing = await pool.query(
+      `SELECT id FROM roles WHERE LOWER(role_name) = LOWER($1)`,
+      [role_name.trim()]
+    );
+
+    if (existing.rows.length > 0) {
+      return res.status(400).json({
+        error: "This role already exists",
+      });
+    }
+
+    const result = await pool.query(
+      `
+      INSERT INTO roles (role_name, description)
+      VALUES ($1, $2)
+      RETURNING *
+      `,
+      [role_name.trim(), description || null]
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: "Role created successfully",
+      data: result.rows[0],
+    });
+  } catch (error) {
+    console.error("createRole error:", error);
+    return res.status(500).json({
+      error: "Internal Server Error",
+    });
+  }
+};
+
+export const updateRole = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { role_name, description, is_active } = req.body;
+
+    const result = await pool.query(
+      `
+      UPDATE roles
+      SET role_name = COALESCE($1, role_name),
+          description = COALESCE($2, description),
+          is_active = COALESCE($3, is_active)
+      WHERE id = $4
+      RETURNING *
+      `,
+      [role_name, description, is_active, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: "Role not found",
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "Role updated successfully",
+      data: result.rows[0],
+    });
+  } catch (error) {
+    console.error("updateRole error:", error);
+    return res.status(500).json({
+      error: "Internal Server Error",
+    });
+  }
+};
+
+export const deleteRole = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      `DELETE FROM roles WHERE id = $1 RETURNING id`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: "Role not found",
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "Role deleted successfully",
+    });
+  } catch (error) {
+    console.error("deleteRole error:", error);
+    return res.status(500).json({
+      error: "Internal Server Error",
+    });
+  }
+};
