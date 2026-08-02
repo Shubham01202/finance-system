@@ -27,6 +27,7 @@ import {
   FaFilePdf,
   FaEye,
   FaTimes,
+  FaPaperPlane,
 } from "react-icons/fa";
 
 /* ───────────────── TYPES ───────────────── */
@@ -424,6 +425,51 @@ const s: Record<string, React.CSSProperties> = {
     fontSize: 14,
   },
 
+  sendBankerBtn: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    background: `linear-gradient(135deg, ${palette.primaryLight}, ${palette.primary})`,
+    color: "#fff",
+    border: "none",
+    padding: "12px 22px",
+    borderRadius: 10,
+    cursor: "pointer",
+    fontWeight: 700,
+    fontSize: 14,
+  },
+  modalInput: {
+    width: "100%",
+    padding: "11px 13px",
+    borderRadius: 10,
+    border: `1.5px solid ${palette.border}`,
+    outline: "none",
+    fontSize: 14,
+    fontFamily: "'Inter', sans-serif",
+    color: palette.text900,
+    boxSizing: "border-box" as const,
+  },
+  modalSecondaryBtn: {
+    padding: "10px 18px",
+    borderRadius: 10,
+    border: `1px solid ${palette.border}`,
+    background: palette.surface,
+    color: palette.text500,
+    fontWeight: 700,
+    fontSize: 14,
+    cursor: "pointer",
+  },
+  modalPrimaryBtn: {
+    padding: "10px 18px",
+    borderRadius: 10,
+    border: "none",
+    background: `linear-gradient(135deg, ${palette.primaryLight}, ${palette.primary})`,
+    color: "#fff",
+    fontWeight: 700,
+    fontSize: 14,
+    cursor: "pointer",
+  },
+
   remarkItem: {
     padding: 16,
     borderRadius: 12,
@@ -458,6 +504,13 @@ export default function AdminApplicationDetailPage() {
 
   // NEW: which document is currently open in the preview modal (images only — PDFs open in a new tab)
   const [previewDoc, setPreviewDoc] = useState<{ url: string; name: string } | null>(null);
+
+  // NEW: send-to-banker modal state
+  const [showBankerModal, setShowBankerModal] = useState(false);
+  const [bankerEmail, setBankerEmail] = useState("");
+  const [bankerSubject, setBankerSubject] = useState("");
+  const [confirmSend, setConfirmSend] = useState(false);
+  const [sendingToBanker, setSendingToBanker] = useState(false);
 
   const token = () => localStorage.getItem("token");
 
@@ -526,8 +579,7 @@ export default function AdminApplicationDetailPage() {
         showBanner("error", data?.message || "Failed to update application.");
         return;
       }
-
-      showBanner("success", `Application ${status} successfully.`);
+showBanner("success", `Application ${status} successfully.`);
       setRemark("");
       fetchApplication();
     } catch (err: any) {
@@ -537,6 +589,64 @@ export default function AdminApplicationDetailPage() {
       setSaving(null);
     }
   };
+
+  /* ── NEW: send-to-banker modal helpers ── */
+  const openBankerModal = () => {
+    setBankerEmail("");
+    setBankerSubject(`Loan Application Details - ${application?.id ?? ""}`);
+    setConfirmSend(false);
+    setShowBankerModal(true);
+  };
+
+  const closeBankerModal = () => {
+    if (sendingToBanker) return;
+    setShowBankerModal(false);
+    setConfirmSend(false);
+  };
+
+  const handleSendToBanker = async () => {
+    if (!bankerEmail.trim() || !bankerSubject.trim()) {
+      showBanner("error", "Please enter both email and subject.");
+      return;
+    }
+
+    // first click just asks for confirmation
+    if (!confirmSend) {
+      setConfirmSend(true);
+      return;
+    }
+
+    try {
+      setSendingToBanker(true);
+
+      const res = await fetch(`${API}/api/admin/applications/${id}/send-to-banker`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token()}`,
+        },
+        body: JSON.stringify({ email: bankerEmail, subject: bankerSubject }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        showBanner("error", data?.message || "Failed to send application to banker.");
+        return;
+      }
+
+      showBanner("success", "Application details sent to banker successfully.");
+      setShowBankerModal(false);
+      setConfirmSend(false);
+    } catch (err: any) {
+      console.error(err);
+      showBanner("error", "Something went wrong while sending the email.");
+    } finally {
+      setSendingToBanker(false);
+    }
+  };
+
+  /* ── NEW: formatting + document preview helpers ── */
 
   /* ── NEW: formatting + document preview helpers ── */
   const fmt = (n?: number) => (n != null ? "₹" + Number(n).toLocaleString("en-IN") : "—");
@@ -754,7 +864,9 @@ export default function AdminApplicationDetailPage() {
           <div className="adm-field-grid" style={s.fieldGrid}>
             <div>
               <div style={s.fieldLabel}>Application ID</div>
-              <div style={{ ...s.fieldValue, fontFamily: "monospace", fontSize: 13.5 }}>{application.id}</div>
+              <div style={{ ...s.fieldValue, fontFamily: "monospace", fontSize: 13.5 }}>
+                {application.application_number || application.id}
+              </div>
             </div>
 
             <div>
@@ -1010,7 +1122,7 @@ export default function AdminApplicationDetailPage() {
           <div style={{ display: "flex", gap: 14, marginTop: 16, flexWrap: "wrap" }}>
             <button
               className="adm-approve-btn"
-              disabled={saving !== null}
+              disabled={saving !== null || application.status?.toLowerCase() === "approved" || application.status?.toLowerCase() === "rejected"}
               onClick={() => updateStatus("approved")}
               style={s.approveBtn}
             >
@@ -1019,12 +1131,22 @@ export default function AdminApplicationDetailPage() {
 
             <button
               className="adm-reject-btn"
-              disabled={saving !== null}
+              disabled={saving !== null || application.status?.toLowerCase() === "approved" || application.status?.toLowerCase() === "rejected"}
               onClick={() => updateStatus("rejected")}
               style={s.rejectBtn}
             >
               <FaTimesCircle /> {saving === "rejected" ? "Rejecting…" : "Reject"}
             </button>
+
+            {application.status?.toLowerCase() === "approved" && (
+              <button
+                className="adm-send-banker-btn"
+                onClick={openBankerModal}
+                style={s.sendBankerBtn}
+              >
+                <FaPaperPlane /> Send to Bankers
+              </button>
+            )}
           </div>
         </div>
 
@@ -1054,6 +1176,7 @@ export default function AdminApplicationDetailPage() {
       </main>
 
       {/* NEW: document preview modal (images only) */}
+{/* NEW: document preview modal (images only) */}
       {previewDoc && (
         <div style={s.modalOverlay} onClick={() => setPreviewDoc(null)}>
           <div style={s.modalBox} onClick={(e) => e.stopPropagation()}>
@@ -1062,6 +1185,63 @@ export default function AdminApplicationDetailPage() {
             </button>
             <div style={{ fontWeight: 700, marginBottom: 12, color: palette.text900 }}>{previewDoc.name}</div>
             <img src={previewDoc.url} alt={previewDoc.name} style={s.modalImg} />
+          </div>
+        </div>
+      )}
+
+      {/* NEW: send-to-banker modal */}
+      {showBankerModal && (
+        <div style={s.modalOverlay} onClick={closeBankerModal}>
+          <div style={{ ...s.modalBox, maxWidth: 480, width: "100%" }} onClick={(e) => e.stopPropagation()}>
+            <button style={s.modalCloseBtn} onClick={closeBankerModal}>
+              <FaTimes />
+            </button>
+
+            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 18, color: palette.text900 }}>
+              Send Application to Banker
+            </div>
+
+            {!confirmSend ? (
+              <>
+                <div style={{ marginBottom: 14 }}>
+                  <div style={s.fieldLabel}>Banker Email</div>
+                  <input
+                    type="email"
+                    value={bankerEmail}
+                    onChange={(e) => setBankerEmail(e.target.value)}
+                    placeholder="banker@example.com"
+                    style={s.modalInput}
+                  />
+                </div>
+                <div>
+                  <div style={s.fieldLabel}>Subject</div>
+                  <input
+                    type="text"
+                    value={bankerSubject}
+                    onChange={(e) => setBankerSubject(e.target.value)}
+                    placeholder="Email subject"
+                    style={s.modalInput}
+                  />
+                </div>
+              </>
+            ) : (
+              <div style={{ fontSize: 14, color: palette.text500, lineHeight: 1.6 }}>
+                Are you sure you want to send this application's full details and attached documents to:
+                <div style={{ fontWeight: 700, color: palette.text900, marginTop: 8 }}>{bankerEmail}</div>
+                <div style={{ marginTop: 6 }}>
+                  Subject: <b>{bankerSubject}</b>
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 12, marginTop: 22, justifyContent: "flex-end" }}>
+              <button style={s.modalSecondaryBtn} onClick={closeBankerModal} disabled={sendingToBanker}>
+                Close
+              </button>
+              <button style={s.modalPrimaryBtn} onClick={handleSendToBanker} disabled={sendingToBanker}>
+                {sendingToBanker ? "Sending…" : confirmSend ? "Yes, Send" : "Send"}
+              </button>
+            </div>
           </div>
         </div>
       )}
