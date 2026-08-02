@@ -47,47 +47,72 @@ interface PendingFile {
   previewUrl: string;
 }
 
-type DocKey =
-  | "pan_aadhaar" | "bank_statement" | "passport_photo"
-  | "co_applicant_kyc" | "salary_slip" | "itr_3years";
+interface LoanServiceOption {
+  id: number;
+  name: string;
+}
 
-const DOC_KEYS: DocKey[] = [
-  "pan_aadhaar", "bank_statement", "passport_photo", "co_applicant_kyc",
-  "salary_slip", "itr_3years",
-];
+interface EmploymentTypeOption {
+  id: number;
+  name: string;
+}
 
-const LOAN_SERVICES = [
-  { value: "personal_loan",         label: "Personal Loan"         },
-  { value: "home_loan",             label: "Home Loan"             },
-  { value: "business_loan",         label: "Business Loan"         },
-  { value: "working_capital_loan",  label: "Working Capital Loan"  },
-  { value: "loan_against_property", label: "Loan Against Property" },
-  { value: "vehicle_loan",          label: "Vehicle Loan"          },
-];
+interface StateOption {
+  id: number;
+  state_name: string;
+}
+
+interface TenureOption {
+  id: number;
+  tenure_months: number;
+  display_name: string | null;
+}
+
+interface DocumentTypeOption {
+  id: number;
+  document_name: string;
+  is_required: boolean;
+  max_size_mb: number;
+  allowed_file_types: string[];
+}
+
+const CATALOG_API = `${process.env.NEXT_PUBLIC_API_URL}/api/catalog`;
+
+const slugify = (s: string) =>
+  s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/(^_|_$)/g, "");
+
+const formatTenure = (t: TenureOption) => {
+  if (t.display_name) return t.display_name;
+  if (t.tenure_months < 12) return `${t.tenure_months} Month${t.tenure_months > 1 ? "s" : ""}`;
+  const years = t.tenure_months / 12;
+  return Number.isInteger(years) ? `${years} Year${years > 1 ? "s" : ""}` : `${t.tenure_months} Months`;
+};
 
 const isPdfFile = (name: string) => name.toLowerCase().endsWith(".pdf");
 
-function normalizeDocuments(raw: any): Partial<Record<DocKey, UploadedFile>> {
-  const result: Partial<Record<DocKey, UploadedFile>> = {};
+/* Normalizes whatever the backend has saved for `documents` into a
+   { [slugifiedDocName]: UploadedFile } map. */
+function normalizeDocuments(raw: any): Record<string, UploadedFile> {
+  const result: Record<string, UploadedFile> = {};
   if (!raw) return result;
 
   const extract = (obj: any): UploadedFile | null => {
     if (!obj || typeof obj !== "object") return null;
     const url =
-      obj.url || obj.file_path || obj.path || obj.filePath || obj.fileUrl || obj.file_url || "";
+      obj.url || obj.file_path || obj.path || obj.filePath || obj.fileUrl || obj.file_url || obj.dataUrl || "";
     const name =
       obj.name || obj.file_name || obj.filename || obj.fileName ||
-      (typeof url === "string" ? url.split("/").pop() : "") || "Document";
+      (typeof url === "string" && !url.startsWith("data:") ? url.split("/").pop() : "") || "Document";
     if (!url) return null;
     return { name, url, uploadedAt: obj.uploadedAt || obj.uploaded_at || obj.createdAt };
   };
 
   if (Array.isArray(raw)) {
     raw.forEach((item: any) => {
-      const key = (item.doc_type || item.key || item.type || item.docKey || "") as DocKey;
+      const key = item.doc_type || item.key || item.type || item.docKey || "";
       if (!key) return;
       const doc = extract(item);
-      if (doc) result[key] = doc;
+      if (doc) result[slugify(key)] = doc;
     });
     return result;
   }
@@ -95,18 +120,40 @@ function normalizeDocuments(raw: any): Partial<Record<DocKey, UploadedFile>> {
   if (typeof raw === "object") {
     Object.entries(raw).forEach(([key, value]) => {
       if (typeof value === "string") {
-        if (value) {
-          result[key as DocKey] = { name: value.split("/").pop() || "Document", url: value };
-        }
+        if (value) result[slugify(key)] = { name: value.split("/").pop() || "Document", url: value };
         return;
       }
       const doc = extract(value);
-      if (doc) result[key as DocKey] = doc;
+      if (doc) result[slugify(key)] = doc;
     });
-    return result;
   }
 
   return result;
+}
+
+/* Loose fallback matcher: if the exact slug of a document type name
+   doesn't match any saved key (e.g. this application was submitted
+   before this document type existed, or names differ slightly),
+   try to find a saved key that shares meaningful words with it. */
+function findExistingDoc(
+  doc: DocumentTypeOption,
+  existingDocuments: Record<string, UploadedFile>
+): UploadedFile | undefined {
+  const exactKey = slugify(doc.document_name);
+  if (existingDocuments[exactKey]) return existingDocuments[exactKey];
+
+  const docWords = exactKey.split("_").filter(w => w.length > 2);
+  let bestMatch: UploadedFile | undefined;
+
+  for (const [savedKey, savedDoc] of Object.entries(existingDocuments)) {
+    const savedWords = savedKey.split("_").filter(w => w.length > 2);
+    const overlap = docWords.filter(w => savedWords.includes(w));
+    if (overlap.length > 0) {
+      bestMatch = savedDoc;
+      break;
+    }
+  }
+  return bestMatch;
 }
 
 /* ─────────────────────────────────────────────
@@ -125,9 +172,18 @@ export default function CustomerEditPage() {
   const [userName, setUserName]   = useState("User");
   const [userEmail, setUserEmail] = useState("");
   const [appStatus, setAppStatus] = useState("");
+  const [applicationNumber, setApplicationNumber] = useState("");
 
-  const [existingDocuments, setExistingDocuments] = useState<Partial<Record<DocKey, UploadedFile>>>({});
-  const [replacedDocuments, setReplacedDocuments] = useState<Partial<Record<DocKey, PendingFile>>>({});
+  const [existingDocuments, setExistingDocuments] = useState<Record<string, UploadedFile>>({});
+  const [replacedDocuments, setReplacedDocuments] = useState<Record<number, PendingFile>>({});
+
+  const [loanServices, setLoanServices]       = useState<LoanServiceOption[]>([]);
+  const [employmentTypes, setEmploymentTypes] = useState<EmploymentTypeOption[]>([]);
+  const [stateOptions, setStateOptions]       = useState<StateOption[]>([]);
+  const [tenureOptions, setTenureOptions]     = useState<TenureOption[]>([]);
+  const [documentTypes, setDocumentTypes]     = useState<DocumentTypeOption[]>([]);
+  const [tenuresLoading, setTenuresLoading]       = useState(false);
+  const [documentsLoading, setDocumentsLoading]   = useState(false);
 
   const isPending = appStatus === "pending";
 
@@ -158,7 +214,71 @@ export default function CustomerEditPage() {
     } catch {}
     fetchApplication(token);
     fetchBanks();
+
+    fetch(`${CATALOG_API}/loan-services`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.success) {
+          console.log("[EditPage] loanServices loaded:", d.data);
+          setLoanServices(d.data);
+        }
+      })
+      .catch(() => {});
+
+    fetch(`${CATALOG_API}/employment-types`)
+      .then(r => r.json())
+      .then(d => { if (d.success) setEmploymentTypes(d.data); })
+      .catch(() => {});
+
+    fetch(`${CATALOG_API}/states`)
+      .then(r => r.json())
+      .then(d => { if (d.success) setStateOptions(d.data); })
+      .catch(() => {});
   }, [id]);
+
+
+
+  const selectedLoanService = loanServices.find(ls => {
+    if (String(ls.id) === formData.loan_service) return true;
+    if (ls.name === formData.loan_service) return true;
+    if (slugify(ls.name) === slugify(formData.loan_service)) return true;
+    return false;
+  });
+
+  useEffect(() => {
+    console.log("[EditPage] formData.loan_service:", formData.loan_service);
+    console.log("[EditPage] selectedLoanService match:", selectedLoanService);
+  }, [formData.loan_service, selectedLoanService]);
+
+  useEffect(() => {
+    setTenureOptions([]);
+    setDocumentTypes([]);
+    if (!selectedLoanService) return;
+
+    setTenuresLoading(true);
+    fetch(`${CATALOG_API}/loan-tenures?loan_service_id=${selectedLoanService.id}`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.success) {
+          console.log("[EditPage] tenureOptions loaded:", d.data);
+          setTenureOptions(d.data);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setTenuresLoading(false));
+
+    setDocumentsLoading(true);
+    fetch(`${CATALOG_API}/document-types?loan_service_id=${selectedLoanService.id}`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.success) {
+          console.log("[EditPage] documentTypes loaded:", d.data);
+          setDocumentTypes(d.data);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setDocumentsLoading(false));
+  }, [selectedLoanService?.id]);
 
   useEffect(() => {
     return () => {
@@ -180,12 +300,16 @@ export default function CustomerEditPage() {
       if (data.success) {
         const app = data.data;
         setAppStatus(app.status);
+        setApplicationNumber(app.application_number || "");
 
         const rawDocs =
           app.documents ?? app.documents_data ?? app.uploaded_documents ??
           app.docs ?? app.files ?? null;
 
+        console.log("[EditPage] raw documents from API:", rawDocs);
+
         const normalized = normalizeDocuments(rawDocs);
+        console.log("[EditPage] normalized existingDocuments (keys):", Object.keys(normalized));
         setExistingDocuments(normalized);
 
         if (app.status !== "pending") {
@@ -243,30 +367,39 @@ export default function CustomerEditPage() {
     if (e.key === "Enter") { e.preventDefault(); inputsRef.current[index + 1]?.focus(); }
   };
 
-  const handleDocUpload = (key: DocKey, e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleDocUpload = (doc: DocumentTypeOption, e: React.ChangeEvent<HTMLInputElement>) => {
     if (!isPending) return;
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) { alert("File must be under 5MB"); return; }
 
-    const prev = replacedDocuments[key];
+    const maxBytes = (doc.max_size_mb || 5) * 1024 * 1024;
+    if (file.size > maxBytes) { alert(`File must be under ${doc.max_size_mb}MB`); return; }
+
+    const ext = file.name.split(".").pop()?.toLowerCase() || "";
+    const allowedExts = doc.allowed_file_types || ["pdf", "jpg", "jpeg", "png"];
+    if (!allowedExts.includes(ext)) {
+      alert(`Only ${allowedExts.join(", ").toUpperCase()} allowed`);
+      return;
+    }
+
+    const prev = replacedDocuments[doc.id];
     if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
 
     const previewUrl = URL.createObjectURL(file);
     setReplacedDocuments(p => ({
       ...p,
-      [key]: { name: file.name, file, previewUrl },
+      [doc.id]: { name: file.name, file, previewUrl },
     }));
 
     e.target.value = "";
   };
 
-  const cancelReplace = (key: DocKey) => {
+  const cancelReplace = (docId: number) => {
     setReplacedDocuments(p => {
       const n = { ...p };
-      const doc = n[key];
+      const doc = n[docId];
       if (doc?.previewUrl) URL.revokeObjectURL(doc.previewUrl);
-      delete n[key];
+      delete n[docId];
       return n;
     });
   };
@@ -274,7 +407,7 @@ export default function CustomerEditPage() {
   const openDoc = (url: string) => {
     if (!url) return;
     const fullUrl =
-      url.startsWith("http") || url.startsWith("blob:")
+      url.startsWith("http") || url.startsWith("blob:") || url.startsWith("data:")
         ? url
         : `${process.env.NEXT_PUBLIC_API_URL}${url.startsWith("/") ? url : `/${url}`}`;
     window.open(fullUrl, "_blank", "noopener,noreferrer");
@@ -304,8 +437,11 @@ export default function CustomerEditPage() {
       const fd = new FormData();
       Object.entries(formData).forEach(([k, v]) => fd.append(k, v ?? ""));
 
-      Object.entries(replacedDocuments).forEach(([key, doc]) => {
-        if (doc?.file) fd.append(key, doc.file, doc.file.name);
+      Object.entries(replacedDocuments).forEach(([docId, doc]) => {
+        if (!doc?.file) return;
+        const docConfig = documentTypes.find(d => d.id === Number(docId));
+        const key = docConfig ? slugify(docConfig.document_name) : `doc_${docId}`;
+        fd.append(key, doc.file, doc.file.name);
       });
 
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/loan/applications/${id}`, {
@@ -378,7 +514,7 @@ export default function CustomerEditPage() {
         </button>
         <h1 className="text-xl sm:text-2xl font-extrabold text-slate-800 m-0">Edit Application</h1>
         <div className="text-[13px] text-slate-400 mt-1">
-          ID: <span className="font-mono text-[#1e3a5f]">#{id?.slice(0, 8).toUpperCase()}</span>
+          ID: <span className="font-mono text-[#1e3a5f]">{applicationNumber || `SN-${id?.slice(0, 4).toUpperCase()}`}</span>
           &nbsp;·&nbsp;
           <span className="text-amber-500 font-semibold">Pending — Editable</span>
         </div>
@@ -435,8 +571,9 @@ export default function CustomerEditPage() {
               <Field label="Employment Type" required error={fieldErrors.employment_type}>
                 <SelectEl ref={setRef(4)} name="employment_type" value={formData.employment_type} onChange={handleChange}>
                   <option value="">Select type</option>
-                  <option value="salaried">Salaried</option>
-                  <option value="business">Business / Self Employed</option>
+                  {employmentTypes.map(et => (
+                    <option key={et.id} value={et.name}>{et.name}</option>
+                  ))}
                 </SelectEl>
               </Field>
               <Field label="Annual Income (₹)" error={fieldErrors.annual_income}>
@@ -457,7 +594,9 @@ export default function CustomerEditPage() {
               <Field label="State" error={fieldErrors.state}>
                 <SelectEl ref={setRef(8)} name="state" value={formData.state} onChange={handleChange}>
                   <option value="">Select State</option>
-                  {indianStates.map(st => <option key={st} value={st}>{st}</option>)}
+                  {stateOptions.map(st => (
+                    <option key={st.id} value={st.state_name}>{st.state_name}</option>
+                  ))}
                 </SelectEl>
               </Field>
               <Field label="Pincode" error={fieldErrors.pincode}>
@@ -487,7 +626,9 @@ export default function CustomerEditPage() {
               <Field label="Loan Service" required error={fieldErrors.loan_service}>
                 <SelectEl name="loan_service" value={formData.loan_service} onChange={handleChange}>
                   <option value="">Select loan service</option>
-                  {LOAN_SERVICES.map(ls => <option key={ls.value} value={ls.value}>{ls.label}</option>)}
+                  {loanServices.map(ls => (
+                    <option key={ls.id} value={ls.name}>{ls.name}</option>
+                  ))}
                 </SelectEl>
               </Field>
             </div>
@@ -502,15 +643,16 @@ export default function CustomerEditPage() {
                 <InputEl ref={setRef(14)} onKeyDown={e => handleKeyDown(e, 14)} name="loan_amount" value={formData.loan_amount} onChange={handleChange} placeholder="Min ₹10,000" icon={<FaMoneyBillWave />} />
               </Field>
               <Field label="Loan Tenure" required error={fieldErrors.tenure}>
-                <SelectEl ref={setRef(15)} name="tenure" value={formData.tenure} onChange={handleChange}>
-                  <option value="">Select tenure</option>
-                  <option value="1">1 Year</option><option value="2">2 Years</option>
-                  <option value="3">3 Years</option><option value="5">5 Years</option>
-                  <option value="7">7 Years</option><option value="10">10 Years</option>
-                  <option value="15">15 Years</option><option value="20">20 Years</option>
+                <SelectEl ref={setRef(15)} name="tenure" value={formData.tenure} onChange={handleChange} disabled={!selectedLoanService || tenuresLoading}>
+                  <option value="">
+                    {!selectedLoanService ? "Select loan service first" : tenuresLoading ? "Loading…" : "Select tenure"}
+                  </option>
+                  {tenureOptions.map(t => (
+                    <option key={t.id} value={t.tenure_months / 12}>{formatTenure(t)}</option>
+                  ))}
                 </SelectEl>
               </Field>
-              {formData.loan_service === "vehicle_loan" && (
+              {formData.loan_service.toLowerCase().includes("vehicle") && (
                 <Field label="Vehicle Details" error={fieldErrors.vehicle_details}>
                   <InputEl ref={setRef(16)} onKeyDown={e => handleKeyDown(e, 16)} name="vehicle_details" value={formData.vehicle_details} onChange={handleChange} placeholder="Make, Model, Year" icon={<FaBuilding />} />
                 </Field>
@@ -540,23 +682,35 @@ export default function CustomerEditPage() {
                 ℹ️ Click <strong>View</strong> to open a document, or <strong>Replace</strong> to upload a new file for that slot. Anything you don't touch stays as-is.
               </div>
             )}
+
+            {documentsLoading && (
+              <div className="text-sm text-slate-400 py-6 text-center">Loading documents…</div>
+            )}
+
+            {!documentsLoading && documentTypes.length === 0 && selectedLoanService && (
+              <div className="text-sm text-slate-400 py-6 text-center">
+                No documents configured for this loan service yet.
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {DOC_KEYS.map(key => {
-                const pendingReplacement = replacedDocuments[key];
-                const existing = existingDocuments[key];
+              {documentTypes.map(doc => {
+                const pendingReplacement = replacedDocuments[doc.id];
+                const existing = findExistingDoc(doc, existingDocuments);
 
                 const displayName = pendingReplacement?.name || existing?.name;
                 const displayUrl  = pendingReplacement?.previewUrl || existing?.url;
                 const hasDoc      = Boolean(displayName && displayUrl);
+                const allowedExts = doc.allowed_file_types || ["pdf", "jpg", "jpeg", "png"];
 
                 return (
                   <div
-                    key={key}
+                    key={doc.id}
                     className={`border-[1.5px] border-dashed rounded-xl px-3.5 py-3 flex flex-col gap-2
                       ${pendingReplacement ? "border-amber-400 bg-amber-50" : hasDoc ? "border-emerald-300 bg-emerald-50" : "border-slate-200 bg-white"}`}
                   >
-                    <div className="text-xs font-semibold text-slate-700 capitalize flex flex-col gap-1">
-                      {key.replace(/_/g, " ")}
+                    <div className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
+                      {doc.document_name}{doc.is_required && <span className="text-red-500"> *</span>}
                       {pendingReplacement && (
                         <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full normal-case w-fit">
                           New file selected
@@ -587,9 +741,9 @@ export default function CustomerEditPage() {
                             <label className="flex items-center gap-1.5 justify-center bg-slate-100 text-slate-600 border border-slate-300 px-2.5 py-1.5 rounded-md cursor-pointer text-xs font-semibold">
                               <input
                                 type="file"
-                                accept=".jpg,.jpeg,.png,.webp,.pdf"
+                                accept={allowedExts.map(t => `.${t}`).join(",")}
                                 className="hidden"
-                                onChange={e => handleDocUpload(key, e)}
+                                onChange={e => handleDocUpload(doc, e)}
                               />
                               Replace
                             </label>
@@ -598,7 +752,7 @@ export default function CustomerEditPage() {
                           {isPending && pendingReplacement && (
                             <button
                               type="button"
-                              onClick={() => cancelReplace(key)}
+                              onClick={() => cancelReplace(doc.id)}
                               className="flex items-center gap-1.5 bg-red-50 border-none text-red-500 px-2.5 py-1.5 rounded-md cursor-pointer text-xs font-semibold shrink-0"
                             >
                               <FaTrash size={11} /> Undo
@@ -608,7 +762,12 @@ export default function CustomerEditPage() {
                       </div>
                     ) : isPending ? (
                       <label className="flex flex-col items-center gap-1.5 bg-slate-50 border-[1.5px] border-dashed border-slate-300 rounded-lg py-3.5 px-2 cursor-pointer">
-                        <input type="file" accept=".jpg,.jpeg,.png,.webp,.pdf" className="hidden" onChange={e => handleDocUpload(key, e)} />
+                        <input
+                          type="file"
+                          accept={allowedExts.map(t => `.${t}`).join(",")}
+                          className="hidden"
+                          onChange={e => handleDocUpload(doc, e)}
+                        />
                         <FaUpload size={16} className="text-slate-400" />
                         <span className="text-xs text-slate-500">Click to upload</span>
                       </label>
@@ -715,12 +874,3 @@ function EmiItem({ label, value, highlight }: { label: string; value: string; hi
     </div>
   );
 }
-
-const indianStates = [
-  "Andhra Pradesh","Arunachal Pradesh","Assam","Bihar","Chhattisgarh","Goa","Gujarat",
-  "Haryana","Himachal Pradesh","Jharkhand","Karnataka","Kerala","Madhya Pradesh",
-  "Maharashtra","Manipur","Meghalaya","Mizoram","Nagaland","Odisha","Punjab","Rajasthan",
-  "Sikkim","Tamil Nadu","Telangana","Tripura","Uttar Pradesh","Uttarakhand","West Bengal",
-  "Andaman and Nicobar Islands","Chandigarh","Dadra and Nagar Haveli and Daman and Diu",
-  "Delhi","Jammu and Kashmir","Ladakh","Lakshadweep","Puducherry",
-];

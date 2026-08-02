@@ -18,9 +18,9 @@ interface DocumentEntry {
   filePath?: string;
   url?: string;
 }
-
 interface Application {
   id: string;
+  application_number?: string;
   loan_type: string;
   loan_amount: number;
   tenure: string;
@@ -84,7 +84,8 @@ export default function CustomerViewPage() {
   const [app, setApp] = useState<Application | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [userName, setUserName] = useState("User");
+  const [userName, setUserName] = useState("CA");
+  const [applicationNumber, setApplicationNumber] = useState("");
   const [userEmail, setUserEmail] = useState("");
 
   useEffect(() => {
@@ -151,8 +152,8 @@ export default function CustomerViewPage() {
             <FaArrowLeft size={12} /> Back to My Loans
           </button>
           <h1 className="text-xl sm:text-2xl font-extrabold text-slate-800 m-0">Application Details</h1>
-          <div className="text-[13px] text-slate-400 mt-1">
-            ID: <span className="font-mono text-[#1e3a5f]">#{id?.slice(0, 8).toUpperCase()}</span>
+        <div className="text-[13px] text-slate-400 mt-1">
+            ID: <span className="font-mono text-[#1e3a5f]">{app?.application_number || `#${id?.slice(0, 8).toUpperCase()}`}</span>
           </div>
         </div>
         {app && (

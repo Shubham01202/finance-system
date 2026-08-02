@@ -137,8 +137,9 @@ export default function CAEditPage() {
   const [error, setError]       = useState("");
   const [success, setSuccess]   = useState("");
   const [banks, setBanks]       = useState<any[]>([]);
-  const [userName, setUserName] = useState("CA");
+const [userName, setUserName] = useState("CA");
   const [caInfo, setCaInfo]     = useState({ name: "", firm: "" });
+  const [applicationNumber, setApplicationNumber] = useState("");
 
   const inputsRef = useRef<(HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null)[]>([]);
   const setRef    = (i: number) =>
@@ -203,7 +204,7 @@ export default function CAEditPage() {
         }
 
         setCaInfo({ name: app.ca_name || "", firm: app.ca_firm || "" });
-
+        setApplicationNumber(app.application_number || "");
         setFormData({
           full_name:            app.full_name            || "",
           email:                app.email                || "",
@@ -414,7 +415,7 @@ export default function CAEditPage() {
           </button>
           <h1 style={s.pageTitle}>Edit Application</h1>
           <div style={s.pageSub}>
-            ID: <span style={{ fontFamily: "monospace", color: "#1e3a5f" }}>#{id?.slice(0, 8).toUpperCase()}</span>
+            ID: <span style={{ fontFamily: "monospace", color: "#1e3a5f" }}>{applicationNumber || `SN-${id?.slice(0, 4).toUpperCase()}`}</span>
             &nbsp;·&nbsp;
             <span style={{ color: "#f59e0b", fontWeight: 600 }}>Pending — Editable</span>
           </div>

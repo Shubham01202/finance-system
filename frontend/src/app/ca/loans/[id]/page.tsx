@@ -29,6 +29,7 @@ interface DocEntry {
 
 interface Application {
   id: string;
+  application_number?: string;
   loan_type: string;
   loan_amount: number;
   tenure: string;
@@ -181,9 +182,9 @@ export default function CAViewPage() {
               <FaArrowLeft size={12} /> Back to Applications
             </button>
             <h1 style={s.pageTitle}>Application Details</h1>
-            <div style={s.pageSub}>
-              ID: <span style={{ fontFamily: "monospace", color: "#1e3a5f" }}>#{id?.slice(0, 8).toUpperCase()}</span>
-            </div>
+           <div className="text-[13px] text-slate-400 mt-1">
+            ID: <span className="font-mono text-[#1e3a5f]">{app?.application_number || `#${id?.slice(0, 8).toUpperCase()}`}</span>
+          </div>
           </div>
           {app && (
             <div className="ca-top-actions">

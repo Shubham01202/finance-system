@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import {
   FaShieldAlt,
@@ -10,6 +11,14 @@ import {
   FaUserCog,
   FaSignOutAlt,
   FaTimes,
+  FaLayerGroup,
+  FaChevronDown,
+  FaFileContract,
+  FaBriefcase,
+  FaMapMarkedAlt,
+  FaHandHoldingUsd,
+  FaCalendarAlt,
+  FaUserShield,
 } from "react-icons/fa";
 
 type Props = {
@@ -27,6 +36,15 @@ const navItems = [
   { icon: FaUserCog, label: "My Profile", href: "/admin/profile" },
 ];
 
+const serviceModuleItems = [
+  { icon: FaFileContract, label: "Manage Documents", href: "/admin/service-module/documents" },
+  { icon: FaBriefcase, label: "Employment Type", href: "/admin/service-module/employment-type" },
+  { icon: FaMapMarkedAlt, label: "State", href: "/admin/service-module/state" },
+  { icon: FaHandHoldingUsd, label: "Loan Service", href: "/admin/service-module/loan-service" },
+  { icon: FaCalendarAlt, label: "Loan Tenure", href: "/admin/service-module/loan-tenure" },
+  { icon: FaUserShield, label: "Roles", href: "/admin/service-module/role" },
+];
+
 export default function AdminSidebar({
   adminName,
   handleLogout,
@@ -35,6 +53,9 @@ export default function AdminSidebar({
 }: Props) {
   const router = useRouter();
   const pathname = usePathname();
+
+  const isServiceModuleRoute = pathname?.startsWith("/admin/service-module");
+  const [serviceModuleOpen, setServiceModuleOpen] = useState(isServiceModuleRoute ?? false);
 
   const go = (href: string) => {
     router.push(href);
@@ -69,6 +90,7 @@ export default function AdminSidebar({
       </div>
 
       {/* Navigation */}
+     {/* Navigation */}
       <nav className="flex-1 flex flex-col gap-1 px-3 mt-4 overflow-y-auto">
         {navItems.map((item) => {
           const active = pathname === item.href;
@@ -84,6 +106,43 @@ export default function AdminSidebar({
             </button>
           );
         })}
+
+        {/* Service Module — expandable */}
+        <div>
+          <button
+            onClick={() => setServiceModuleOpen((prev) => !prev)}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold transition-colors text-left
+            ${isServiceModuleRoute ? "bg-white text-[#1e3a5f]" : "text-white/70 hover:bg-white/10 hover:text-white"}`}
+          >
+            <FaLayerGroup size={15} className={isServiceModuleRoute ? "text-[#1e3a5f]" : "text-white/60"} />
+            <span className="flex-1"> Manage Services</span>
+            <FaChevronDown
+              size={11}
+              className={`transition-transform duration-200 ${serviceModuleOpen ? "rotate-180" : ""} ${isServiceModuleRoute ? "text-[#1e3a5f]" : "text-white/50"}`}
+            />
+          </button>
+
+          <div
+            className={`overflow-hidden transition-all duration-300 ease-in-out ${serviceModuleOpen ? "max-h-96 opacity-100 mt-1" : "max-h-0 opacity-0"}`}
+          >
+            <div className="flex flex-col gap-1 pl-3 border-l border-white/10 ml-4">
+              {serviceModuleItems.map((sub) => {
+                const active = pathname === sub.href;
+                return (
+                  <button
+                    key={sub.href}
+                    onClick={() => go(sub.href)}
+                    className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium transition-colors text-left
+                    ${active ? "bg-white text-[#1e3a5f]" : "text-white/60 hover:bg-white/10 hover:text-white"}`}
+                  >
+                    <sub.icon size={13} className={active ? "text-[#1e3a5f]" : "text-white/45"} />
+                    <span>{sub.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
       </nav>
 
       {/* Bottom user */}
