@@ -591,9 +591,9 @@ showBanner("success", `Application ${status} successfully.`);
   };
 
   /* ── NEW: send-to-banker modal helpers ── */
-  const openBankerModal = () => {
+const openBankerModal = () => {
     setBankerEmail("");
-    setBankerSubject(`Loan Application Details - ${application?.id ?? ""}`);
+    setBankerSubject(`Loan Application Details - ${application?.application_number || application?.id || ""}`);
     setConfirmSend(false);
     setShowBankerModal(true);
   };

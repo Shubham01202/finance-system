@@ -48,43 +48,39 @@ interface PendingFile {
   dataUrl: string; uploadedAt: string;
 }
 
-type DocKey =
-  | "aadhaar_card" | "pan_card" | "bank_statement" | "passport_photo"
-  | "co_applicant_kyc" | "salary_slip" | "itr_3years";
+interface LoanServiceOption { id: number; name: string; }
+interface EmploymentTypeOption { id: number; name: string; }
+interface StateOption { id: number; state_name: string; }
+interface TenureOption { id: number; tenure_months: number; display_name: string | null; }
+interface DocumentTypeOption {
+  id: number;
+  document_name: string;
+  is_required: boolean;
+  max_size_mb: number;
+  allowed_file_types: string[];
+}
 
-const DOC_KEYS: DocKey[] = [
-  "aadhaar_card", "pan_card", "bank_statement", "passport_photo",
-  "co_applicant_kyc", "salary_slip", "itr_3years",
-];
+const CATALOG_API = `${process.env.NEXT_PUBLIC_API_URL}/api/catalog`;
 
-const DOC_LABELS: Record<DocKey, string> = {
-  aadhaar_card: "Aadhaar Card",
-  pan_card: "PAN Card",
-  bank_statement: "Bank Statement",
-  passport_photo: "Passport Photo",
-  co_applicant_kyc: "Co-Applicant KYC",
-  salary_slip: "Salary Slip",
-  itr_3years: "ITR (3 Years)",
+const slugify = (s: string) =>
+  s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/(^_|_$)/g, "");
+
+const formatTenure = (t: TenureOption) => {
+  if (t.display_name) return t.display_name;
+  if (t.tenure_months < 12) return `${t.tenure_months} Month${t.tenure_months > 1 ? "s" : ""}`;
+  const years = t.tenure_months / 12;
+  return Number.isInteger(years) ? `${years} Year${years > 1 ? "s" : ""}` : `${t.tenure_months} Months`;
 };
-
-const LOAN_SERVICES = [
-  { value: "personal_loan",         label: "Personal Loan"         },
-  { value: "home_loan",             label: "Home Loan"             },
-  { value: "business_loan",         label: "Business Loan"         },
-  { value: "working_capital_loan",  label: "Working Capital Loan"  },
-  { value: "loan_against_property", label: "Loan Against Property" },
-  { value: "vehicle_loan",          label: "Vehicle Loan"          },
-];
 
 const isPdfByNameOrType = (name?: string, type?: string) =>
   (type ? type === "application/pdf" : false) || (name ? name.toLowerCase().endsWith(".pdf") : false);
 
 /* ─────────────────────────────────────────────
    HELPER: normalize whatever shape the backend
-   sends "documents" in, into Record<DocKey, ExistingFile>.
+   sends "documents" in, into a { [slugifiedName]: ExistingFile } map.
 ───────────────────────────────────────────── */
-function normalizeDocuments(raw: any): Partial<Record<DocKey, ExistingFile>> {
-  const result: Partial<Record<DocKey, ExistingFile>> = {};
+function normalizeDocuments(raw: any): Record<string, ExistingFile> {
+  const result: Record<string, ExistingFile> = {};
   if (!raw) return result;
 
   const extract = (obj: any): ExistingFile | null => {
@@ -102,10 +98,10 @@ function normalizeDocuments(raw: any): Partial<Record<DocKey, ExistingFile>> {
 
   if (Array.isArray(raw)) {
     raw.forEach((item: any) => {
-      const key = (item.doc_type || item.key || item.type || item.docKey || "") as DocKey;
+      const key = item.doc_type || item.key || item.type || item.docKey || "";
       if (!key) return;
       const doc = extract(item);
-      if (doc) result[key] = doc;
+      if (doc) result[slugify(key)] = doc;
     });
     return result;
   }
@@ -113,15 +109,32 @@ function normalizeDocuments(raw: any): Partial<Record<DocKey, ExistingFile>> {
   if (typeof raw === "object") {
     Object.entries(raw).forEach(([key, value]) => {
       if (typeof value === "string") {
-        if (value) result[key as DocKey] = { name: value.split("/").pop() || "Document", url: value };
+        if (value) result[slugify(key)] = { name: value.split("/").pop() || "Document", url: value };
         return;
       }
       const doc = extract(value);
-      if (doc) result[key as DocKey] = doc;
+      if (doc) result[slugify(key)] = doc;
     });
   }
 
   return result;
+}
+
+/* Loose fallback matcher: if the exact slug of a document type name
+   doesn't match any saved key, try a fuzzy word-overlap match. */
+function findExistingDoc(
+  doc: DocumentTypeOption,
+  existingDocuments: Record<string, ExistingFile>
+): ExistingFile | undefined {
+  const exactKey = slugify(doc.document_name);
+  if (existingDocuments[exactKey]) return existingDocuments[exactKey];
+
+  const docWords = exactKey.split("_").filter(w => w.length > 2);
+  for (const [savedKey, savedDoc] of Object.entries(existingDocuments)) {
+    const savedWords = savedKey.split("_").filter(w => w.length > 2);
+    if (docWords.some(w => savedWords.includes(w))) return savedDoc;
+  }
+  return undefined;
 }
 
 /* ─────────────────────────────────────────────
@@ -141,6 +154,14 @@ const [userName, setUserName] = useState("CA");
   const [caInfo, setCaInfo]     = useState({ name: "", firm: "" });
   const [applicationNumber, setApplicationNumber] = useState("");
 
+  const [loanServices, setLoanServices]       = useState<LoanServiceOption[]>([]);
+  const [employmentTypes, setEmploymentTypes] = useState<EmploymentTypeOption[]>([]);
+  const [stateOptions, setStateOptions]       = useState<StateOption[]>([]);
+  const [tenureOptions, setTenureOptions]     = useState<TenureOption[]>([]);
+  const [documentTypes, setDocumentTypes]     = useState<DocumentTypeOption[]>([]);
+  const [tenuresLoading, setTenuresLoading]       = useState(false);
+  const [documentsLoading, setDocumentsLoading]   = useState(false);
+
   const inputsRef = useRef<(HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null)[]>([]);
   const setRef    = (i: number) =>
     (el: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null): void => {
@@ -156,10 +177,10 @@ const [userName, setUserName] = useState("CA");
     co_applicant_name: "", co_applicant_aadhaar: "", co_applicant_pan: "",
   });
 
-  // Documents already on the server, loaded when the page opens
-  const [existingDocuments, setExistingDocuments] = useState<Partial<Record<DocKey, ExistingFile>>>({});
+ // Documents already on the server, loaded when the page opens
+  const [existingDocuments, setExistingDocuments] = useState<Record<string, ExistingFile>>({});
   // Documents freshly picked in this session to replace an existing one (not yet saved)
-  const [documents, setDocuments] = useState<Partial<Record<DocKey, PendingFile>>>({});
+  const [documents, setDocuments] = useState<Record<number, PendingFile>>({});
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof FormData, string>>>({});
 
   useEffect(() => {
@@ -172,8 +193,51 @@ const [userName, setUserName] = useState("CA");
     } catch {}
     fetchApplication(token);
     fetchBanks();
+
+    fetch(`${CATALOG_API}/loan-services`)
+      .then(r => r.json())
+      .then(d => { if (d.success) setLoanServices(d.data); })
+      .catch(() => {});
+
+    fetch(`${CATALOG_API}/employment-types`)
+      .then(r => r.json())
+      .then(d => { if (d.success) setEmploymentTypes(d.data); })
+      .catch(() => {});
+
+    fetch(`${CATALOG_API}/states`)
+      .then(r => r.json())
+      .then(d => { if (d.success) setStateOptions(d.data); })
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // Resolve the selected loan service — stored value may be a name/slug OR a raw id.
+  const selectedLoanService = loanServices.find(ls => {
+    if (String(ls.id) === formData.loan_service) return true;
+    if (ls.name === formData.loan_service) return true;
+    if (slugify(ls.name) === slugify(formData.loan_service)) return true;
+    return false;
+  });
+
+  useEffect(() => {
+    setTenureOptions([]);
+    setDocumentTypes([]);
+    if (!selectedLoanService) return;
+
+    setTenuresLoading(true);
+    fetch(`${CATALOG_API}/loan-tenures?loan_service_id=${selectedLoanService.id}`)
+      .then(r => r.json())
+      .then(d => { if (d.success) setTenureOptions(d.data); })
+      .catch(() => {})
+      .finally(() => setTenuresLoading(false));
+
+    setDocumentsLoading(true);
+    fetch(`${CATALOG_API}/document-types?loan_service_id=${selectedLoanService.id}`)
+      .then(r => r.json())
+      .then(d => { if (d.success) setDocumentTypes(d.data); })
+      .catch(() => {})
+      .finally(() => setDocumentsLoading(false));
+  }, [selectedLoanService?.id]);
 
   const fetchApplication = async (token: string) => {
     try {
@@ -256,15 +320,25 @@ const [userName, setUserName] = useState("CA");
   };
 
   /* ── DOCUMENT UPLOAD (replace) ── */
-  const handleDocUpload = (key: DocKey, e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleDocUpload = (doc: DocumentTypeOption, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) { alert("File must be under 5MB"); return; }
+
+    const maxBytes = (doc.max_size_mb || 5) * 1024 * 1024;
+    if (file.size > maxBytes) { alert(`File must be under ${doc.max_size_mb}MB`); return; }
+
+    const ext = file.name.split(".").pop()?.toLowerCase() || "";
+    const allowedExts = doc.allowed_file_types || ["pdf", "jpg", "jpeg", "png"];
+    if (!allowedExts.includes(ext)) {
+      alert(`Only ${allowedExts.join(", ").toUpperCase()} allowed`);
+      return;
+    }
+
     const reader = new FileReader();
     reader.onloadend = () => {
       setDocuments(p => ({
         ...p,
-        [key]: {
+        [doc.id]: {
           name: file.name, size: file.size, type: file.type,
           dataUrl: reader.result as string,
           uploadedAt: new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
@@ -275,8 +349,8 @@ const [userName, setUserName] = useState("CA");
     e.target.value = "";
   };
 
-  const removeDoc = (key: DocKey) => {
-    setDocuments(p => { const n = { ...p }; delete n[key]; return n; });
+  const removeDoc = (docId: number) => {
+    setDocuments(p => { const n = { ...p }; delete n[docId]; return n; });
   };
 
   const dataUrlToBlobUrl = (dataUrl: string): string => {
@@ -347,13 +421,18 @@ const [userName, setUserName] = useState("CA");
     if (!token) { router.push("/"); return; }
     setSaving(true); setError(""); setSuccess("");
 
-    const mergedDocumentPayload: Record<string, { name: string; uploadedAt?: string; dataUrl?: string; url?: string }> = {};
+ const mergedDocumentPayload: Record<string, { name: string; uploadedAt?: string; dataUrl?: string; url?: string }> = {};
 
+    // Keep any existing doc that hasn't been replaced this session
     Object.entries(existingDocuments).forEach(([key, doc]) => {
       if (doc) mergedDocumentPayload[key] = { name: doc.name, uploadedAt: doc.uploadedAt, url: doc.url };
     });
-    Object.entries(documents).forEach(([key, file]) => {
-      if (file) mergedDocumentPayload[key] = { name: file.name, uploadedAt: file.uploadedAt, dataUrl: file.dataUrl };
+    // Overlay newly picked replacements, keyed by the current document type's slug
+    Object.entries(documents).forEach(([docId, file]) => {
+      if (!file) return;
+      const docConfig = documentTypes.find(d => d.id === Number(docId));
+      const key = docConfig ? slugify(docConfig.document_name) : `doc_${docId}`;
+      mergedDocumentPayload[key] = { name: file.name, uploadedAt: file.uploadedAt, dataUrl: file.dataUrl };
     });
 
     try {
@@ -362,7 +441,7 @@ const [userName, setUserName] = useState("CA");
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           ...formData,
-          loan_service: formData.loan_service,
+          loan_service: selectedLoanService?.name || formData.loan_service,
           documents: Object.keys(mergedDocumentPayload).length > 0 ? mergedDocumentPayload : undefined,
         }),
       });
@@ -470,8 +549,9 @@ const [userName, setUserName] = useState("CA");
                 <Field label="Employment Type" required error={fieldErrors.employment_type}>
                   <SelectEl ref={setRef(4)} name="employment_type" value={formData.employment_type} onChange={handleChange}>
                     <option value="">Select type</option>
-                    <option value="salaried">Salaried</option>
-                    <option value="business">Business / Self Employed</option>
+                    {employmentTypes.map(et => (
+                      <option key={et.id} value={et.name}>{et.name}</option>
+                    ))}
                   </SelectEl>
                 </Field>
                 <Field label="Annual Income (₹)" error={fieldErrors.annual_income}>
@@ -488,10 +568,12 @@ const [userName, setUserName] = useState("CA");
                 <Field label="City" error={fieldErrors.city}>
                   <InputEl ref={setRef(7)} onKeyDown={e => handleKeyDown(e, 7)} name="city" value={formData.city} onChange={handleChange} placeholder="City" icon={<FaBuilding />} />
                 </Field>
-                <Field label="State" error={fieldErrors.state}>
+               <Field label="State" error={fieldErrors.state}>
                   <SelectEl ref={setRef(8)} name="state" value={formData.state} onChange={handleChange}>
                     <option value="">Select State</option>
-                    {indianStates.map(st => <option key={st} value={st}>{st}</option>)}
+                    {stateOptions.map(st => (
+                      <option key={st.id} value={st.state_name}>{st.state_name}</option>
+                    ))}
                   </SelectEl>
                 </Field>
                 <Field label="Pincode" error={fieldErrors.pincode}>
@@ -520,7 +602,9 @@ const [userName, setUserName] = useState("CA");
               <Field label="Loan Service" required error={fieldErrors.loan_service}>
                 <SelectEl name="loan_service" value={formData.loan_service} onChange={handleChange}>
                   <option value="">Select loan service</option>
-                  {LOAN_SERVICES.map(ls => <option key={ls.value} value={ls.value}>{ls.label}</option>)}
+                  {loanServices.map(ls => (
+                    <option key={ls.id} value={ls.name}>{ls.name}</option>
+                  ))}
                 </SelectEl>
               </Field>
               <TwoCol>
@@ -533,16 +617,17 @@ const [userName, setUserName] = useState("CA");
                 <Field label="Loan Amount (₹)" required error={fieldErrors.loan_amount}>
                   <InputEl ref={setRef(14)} onKeyDown={e => handleKeyDown(e, 14)} name="loan_amount" value={formData.loan_amount} onChange={handleChange} placeholder="Min ₹10,000" icon={<FaMoneyBillWave />} />
                 </Field>
-                <Field label="Loan Tenure" required error={fieldErrors.tenure}>
-                  <SelectEl ref={setRef(15)} name="tenure" value={formData.tenure} onChange={handleChange}>
-                    <option value="">Select tenure</option>
-                    <option value="1">1 Year</option><option value="2">2 Years</option>
-                    <option value="3">3 Years</option><option value="5">5 Years</option>
-                    <option value="7">7 Years</option><option value="10">10 Years</option>
-                    <option value="15">15 Years</option><option value="20">20 Years</option>
+               <Field label="Loan Tenure" required error={fieldErrors.tenure}>
+                  <SelectEl ref={setRef(15)} name="tenure" value={formData.tenure} onChange={handleChange} disabled={!selectedLoanService || tenuresLoading}>
+                    <option value="">
+                      {!selectedLoanService ? "Select loan service first" : tenuresLoading ? "Loading…" : "Select tenure"}
+                    </option>
+                    {tenureOptions.map(t => (
+                      <option key={t.id} value={t.tenure_months / 12}>{formatTenure(t)}</option>
+                    ))}
                   </SelectEl>
                 </Field>
-                {formData.loan_service === "vehicle_loan" && (
+                {formData.loan_service.toLowerCase().includes("vehicle") && (
                   <Field label="Vehicle Details" error={fieldErrors.vehicle_details}>
                     <InputEl ref={setRef(16)} onKeyDown={e => handleKeyDown(e, 16)} name="vehicle_details" value={formData.vehicle_details} onChange={handleChange} placeholder="Make, Model, Year" icon={<FaBuilding />} />
                   </Field>
@@ -562,26 +647,33 @@ const [userName, setUserName] = useState("CA");
               )}
             </Section>
 
-            {/* ── SECTION 5: Documents ── */}
+          {/* ── SECTION 5: Documents ── */}
             <Section title="Documents" icon="📄" subtitle="View uploaded documents, or replace any of them">
               <div style={s.docNotice}>
                 ℹ️ Click <strong>View</strong> to open a document, or <strong>Replace</strong> to upload a new file for that slot. Anything you don't touch stays as-is.
               </div>
+
+              {documentsLoading && (
+                <div style={{ fontSize: 13, color: "#94a3b8", padding: "20px 0", textAlign: "center" as const }}>Loading documents…</div>
+              )}
+
               <div className="ca-doc-grid" style={s.docGrid}>
-                {DOC_KEYS.map(key => {
-                  const pendingReplacement = documents[key];
-                  const existing = existingDocuments[key];
+                {documentTypes.map(doc => {
+                  const pendingReplacement = documents[doc.id];
+                  const existing = findExistingDoc(doc, existingDocuments);
 
                   const displayName = pendingReplacement?.name || existing?.name;
                   const displayUrl  = pendingReplacement?.dataUrl || existing?.url;
                   const displayType = pendingReplacement?.type;
                   const hasDoc      = Boolean(displayName && displayUrl);
+                  const allowedExts = doc.allowed_file_types || ["pdf", "jpg", "jpeg", "png"];
 
-                  const isKycKey = key === "aadhaar_card" || key === "pan_card";
+                  const nameLower = doc.document_name.toLowerCase();
+                  const isKycKey = nameLower.includes("aadhaar") || nameLower.includes("pan");
 
                   return (
                     <div
-                      key={key}
+                      key={doc.id}
                       style={{
                         ...s.docCard,
                         borderColor: pendingReplacement ? "#fbbf24" : hasDoc ? "#86efac" : "#e2e8f0",
@@ -590,10 +682,10 @@ const [userName, setUserName] = useState("CA");
                     >
                       <div style={s.docLabel}>
                         <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          {isKycKey && (key === "aadhaar_card"
+                          {isKycKey && (nameLower.includes("aadhaar")
                             ? <FaIdCard size={13} color="#059669" />
                             : <FaRegIdCard size={13} color="#0284c7" />)}
-                          {DOC_LABELS[key]}
+                          {doc.document_name}{doc.is_required && <span style={{ color: "#ef4444" }}> *</span>}
                         </span>
                         {pendingReplacement && <span style={s.replacePill}>New file selected</span>}
                       </div>
@@ -619,16 +711,16 @@ const [userName, setUserName] = useState("CA");
                               <label style={s.replaceBtn}>
                                 <input
                                   type="file"
-                                  accept=".jpg,.jpeg,.png,.webp,.pdf"
+                                  accept={allowedExts.map(t => `.${t}`).join(",")}
                                   style={{ display: "none" }}
-                                  onChange={e => handleDocUpload(key, e)}
+                                  onChange={e => handleDocUpload(doc, e)}
                                 />
                                 Replace
                               </label>
                             )}
 
                             {pendingReplacement && (
-                              <button type="button" style={s.removeBtn} onClick={() => removeDoc(key)}>
+                              <button type="button" style={s.removeBtn} onClick={() => removeDoc(doc.id)}>
                                 <FaTrash size={11} /> Undo
                               </button>
                             )}
@@ -636,7 +728,12 @@ const [userName, setUserName] = useState("CA");
                         </div>
                       ) : (
                         <label style={s.uploadArea}>
-                          <input type="file" accept=".jpg,.jpeg,.png,.webp,.pdf" style={{ display: "none" }} onChange={e => handleDocUpload(key, e)} />
+                          <input
+                            type="file"
+                            accept={allowedExts.map(t => `.${t}`).join(",")}
+                            style={{ display: "none" }}
+                            onChange={e => handleDocUpload(doc, e)}
+                          />
                           <FaUpload size={15} color="#94a3b8" />
                           <span style={{ fontSize: 12, color: "#64748b" }}>Click to upload</span>
                         </label>
@@ -834,12 +931,3 @@ const s: Record<string, React.CSSProperties> = {
   spinner:  { width: 34, height: 34, border: "3px solid #e2e8f0", borderTop: "3px solid #1e3a5f", borderRadius: "50%", animation: "spin 0.8s linear infinite" },
   mutedText:{ color: "#94a3b8", fontSize: 14 },
 };
-
-const indianStates = [
-  "Andhra Pradesh","Arunachal Pradesh","Assam","Bihar","Chhattisgarh","Goa","Gujarat",
-  "Haryana","Himachal Pradesh","Jharkhand","Karnataka","Kerala","Madhya Pradesh",
-  "Maharashtra","Manipur","Meghalaya","Mizoram","Nagaland","Odisha","Punjab","Rajasthan",
-  "Sikkim","Tamil Nadu","Telangana","Tripura","Uttar Pradesh","Uttarakhand","West Bengal",
-  "Andaman and Nicobar Islands","Chandigarh","Dadra and Nagar Haveli and Daman and Diu",
-  "Delhi","Jammu and Kashmir","Ladakh","Lakshadweep","Puducherry",
-];

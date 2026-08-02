@@ -277,25 +277,6 @@ export default function CAViewPage() {
                 <Row label="Filed By" value={app.applied_by === "ca" ? "Chartered Accountant" : "Customer"} />
               </InfoCard>
 
-              {/* Aadhaar Card Document */}
-              <DocCard
-                title="Aadhaar Card"
-                icon={<FaIdCard />}
-                color="#059669"
-                docs={aadhaarDocs}
-                resolveDocUrl={resolveDocUrl}
-                handleViewDoc={handleViewDoc}
-              />
-
-              {/* PAN Card Document */}
-              <DocCard
-                title="PAN Card"
-                icon={<FaRegIdCard />}
-                color="#0284c7"
-                docs={panDocs}
-                resolveDocUrl={resolveDocUrl}
-                handleViewDoc={handleViewDoc}
-              />
 
               {/* Other Documents */}
               {otherDocs.length > 0 && (

@@ -41,146 +41,29 @@ interface UploadedFile {
   name: string; size: number; type: string;
   dataUrl: string; uploadedAt: string;
 }
+interface LoanServiceOption { id: number; name: string; }
+interface EmploymentTypeOption { id: number; name: string; }
+interface StateOption { id: number; state_name: string; }
+interface TenureOption { id: number; tenure_months: number; display_name: string | null; }
+interface DocumentTypeOption {
+  id: number;
+  document_name: string;
+  is_required: boolean;
+  max_size_mb: number;
+  allowed_file_types: string[];
+}
 
-type DocKey =
-  | "pan_card" | "aadhaar_card" | "bank_statement" | "passport_photo"
-  | "co_applicant_kyc" | "salary_slip" | "itr_3years"
-  | "electricity_bill" | "gst_registration" | "udyam_registration"
-  | "property_paper" | "seller_buyer_agreement"
-  | "vehicle_details_doc" | "audit_report";
+const CATALOG_API = `${process.env.NEXT_PUBLIC_API_URL}/api/catalog`;
 
-interface DocConfig { key: DocKey; label: string; description: string; required: boolean; }
+const slugify = (s: string) =>
+  s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/(^_|_$)/g, "");
 
-/* ── DOCUMENT MAP (PAN and Aadhaar now separate upload fields) ── */
-const DOC_MAP: Record<string, DocConfig[]> = {
-  "personal_loan__salaried": [
-    { key: "pan_card",         label: "PAN Card",                         description: "Clear copy of PAN card",                        required: true },
-    { key: "aadhaar_card",     label: "Aadhaar Card",                     description: "Clear copy of Aadhaar (front & back)",          required: true },
-    { key: "bank_statement",   label: "1-Year Bank Statement",            description: "Complete 12 months bank statement",             required: true },
-    { key: "passport_photo",   label: "Photo & ID Proof",                 description: "Passport size photo",                           required: true },
-    { key: "co_applicant_kyc", label: "Co-Applicant KYC",                 description: "Co-applicant PAN & Aadhaar",                    required: true },
-    { key: "salary_slip",      label: "Last 3 Months Salary Slips",       description: "Latest 3 months salary slips",                  required: true },
-    { key: "itr_3years",       label: "Last 3 Years ITR",                 description: "ITR for last 3 financial years",                required: true },
-  ],
-  "personal_loan__business": [
-    { key: "pan_card",         label: "PAN Card",                         description: "Clear copy of PAN card",                        required: true },
-    { key: "aadhaar_card",     label: "Aadhaar Card",                     description: "Clear copy of Aadhaar (front & back)",          required: true },
-    { key: "bank_statement",   label: "1-Year Bank Statement",            description: "Complete 12 months bank statement",             required: true },
-    { key: "passport_photo",   label: "Photo & ID Proof",                 description: "Passport size photo",                           required: true },
-    { key: "co_applicant_kyc", label: "Co-Applicant KYC",                 description: "Co-applicant PAN & Aadhaar",                    required: true },
-    { key: "itr_3years",       label: "Last 3 Years ITR + Audit Reports", description: "ITR, GST returns, P&L, Balance Sheet",          required: true },
-  ],
-  "home_loan__salaried": [
-    { key: "pan_card",               label: "PAN Card",                        description: "Clear copy of PAN card",                   required: true },
-    { key: "aadhaar_card",           label: "Aadhaar Card",                    description: "Clear copy of Aadhaar (front & back)",     required: true },
-    { key: "bank_statement",         label: "1-Year Bank Statement",           description: "Complete 12 months bank statement",        required: true },
-    { key: "passport_photo",         label: "Photo & ID Proof",               description: "Passport size photo",                      required: true },
-    { key: "co_applicant_kyc",       label: "Co-Applicant KYC",               description: "Co-applicant PAN & Aadhaar",               required: true },
-    { key: "seller_buyer_agreement", label: "Seller Buyer Agreement",          description: "Property sale/purchase agreement",         required: true },
-    { key: "salary_slip",            label: "Last 3 Months Salary Slips",     description: "Latest 3 months salary slips",             required: true },
-    { key: "itr_3years",             label: "Last 3 Years ITR",               description: "ITR for last 3 financial years",           required: true },
-  ],
-  "home_loan__business": [
-    { key: "pan_card",               label: "PAN Card",                        description: "Clear copy of PAN card",                   required: true },
-    { key: "aadhaar_card",           label: "Aadhaar Card",                    description: "Clear copy of Aadhaar (front & back)",     required: true },
-    { key: "bank_statement",         label: "1-Year Bank Statement",           description: "Complete 12 months bank statement",        required: true },
-    { key: "passport_photo",         label: "Photo & ID Proof",               description: "Passport size photo",                      required: true },
-    { key: "co_applicant_kyc",       label: "Co-Applicant KYC",               description: "Co-applicant PAN & Aadhaar",               required: true },
-    { key: "seller_buyer_agreement", label: "Seller Buyer Agreement",          description: "Property sale/purchase agreement",         required: true },
-    { key: "itr_3years",             label: "Last 3 Years ITR + Audit Reports",description: "ITR, GST returns, P&L, Balance Sheet",    required: true },
-  ],
-  "business_loan__salaried": [
-    { key: "pan_card",          label: "PAN Card",                        description: "Clear copy of PAN card",                       required: true },
-    { key: "aadhaar_card",      label: "Aadhaar Card",                    description: "Clear copy of Aadhaar (front & back)",         required: true },
-    { key: "bank_statement",    label: "1-Year Bank Statement",           description: "Complete 12 months bank statement",            required: true },
-    { key: "passport_photo",    label: "Photo & ID Proof",               description: "Passport size photo",                          required: true },
-    { key: "co_applicant_kyc",  label: "Co-Applicant KYC",               description: "Co-applicant PAN & Aadhaar",                   required: true },
-    { key: "electricity_bill",  label: "Electricity Bill",               description: "Latest electricity bill",                      required: true },
-    { key: "gst_registration",  label: "GST Registration",               description: "GST registration certificate",                 required: true },
-    { key: "udyam_registration",label: "Udyam Registration",             description: "Udyam/MSME registration certificate",          required: true },
-    { key: "itr_3years",        label: "Last 3 Years ITR + Audit Reports",description: "ITR, GST returns, P&L, Balance Sheet",        required: true },
-  ],
-  "business_loan__business": [
-    { key: "pan_card",          label: "PAN Card",                        description: "Clear copy of PAN card",                       required: true },
-    { key: "aadhaar_card",      label: "Aadhaar Card",                    description: "Clear copy of Aadhaar (front & back)",         required: true },
-    { key: "bank_statement",    label: "1-Year Bank Statement",           description: "Complete 12 months bank statement",            required: true },
-    { key: "passport_photo",    label: "Photo & ID Proof",               description: "Passport size photo",                          required: true },
-    { key: "co_applicant_kyc",  label: "Co-Applicant KYC",               description: "Co-applicant PAN & Aadhaar",                   required: true },
-    { key: "electricity_bill",  label: "Electricity Bill",               description: "Latest electricity bill",                      required: true },
-    { key: "gst_registration",  label: "GST Registration",               description: "GST registration certificate",                 required: true },
-    { key: "udyam_registration",label: "Udyam Registration",             description: "Udyam/MSME registration certificate",          required: true },
-    { key: "itr_3years",        label: "Last 3 Years ITR + Audit Reports",description: "ITR, GST returns, P&L, Balance Sheet",        required: true },
-  ],
-  "working_capital_loan__salaried": [
-    { key: "pan_card",          label: "PAN Card",                        description: "Clear copy of PAN card",                       required: true },
-    { key: "aadhaar_card",      label: "Aadhaar Card",                    description: "Clear copy of Aadhaar (front & back)",         required: true },
-    { key: "bank_statement",    label: "1-Year Bank Statement",           description: "Complete 12 months bank statement",            required: true },
-    { key: "passport_photo",    label: "Photo & ID Proof",               description: "Passport size photo",                          required: true },
-    { key: "co_applicant_kyc",  label: "Co-Applicant KYC",               description: "Co-applicant PAN & Aadhaar",                   required: true },
-    { key: "electricity_bill",  label: "Electricity Bill",               description: "Latest electricity bill",                      required: true },
-    { key: "gst_registration",  label: "GST Registration",               description: "GST registration certificate",                 required: true },
-    { key: "udyam_registration",label: "Udyam Registration",             description: "Udyam/MSME registration certificate",          required: true },
-    { key: "itr_3years",        label: "Last 3 Years ITR + Audit Reports",description: "ITR, GST returns, P&L, Balance Sheet",        required: true },
-  ],
-  "working_capital_loan__business": [
-    { key: "pan_card",          label: "PAN Card",                        description: "Clear copy of PAN card",                       required: true },
-    { key: "aadhaar_card",      label: "Aadhaar Card",                    description: "Clear copy of Aadhaar (front & back)",         required: true },
-    { key: "bank_statement",    label: "1-Year Bank Statement",           description: "Complete 12 months bank statement",            required: true },
-    { key: "passport_photo",    label: "Photo & ID Proof",               description: "Passport size photo",                          required: true },
-    { key: "co_applicant_kyc",  label: "Co-Applicant KYC",               description: "Co-applicant PAN & Aadhaar",                   required: true },
-    { key: "electricity_bill",  label: "Electricity Bill",               description: "Latest electricity bill",                      required: true },
-    { key: "gst_registration",  label: "GST Registration",               description: "GST registration certificate",                 required: true },
-    { key: "udyam_registration",label: "Udyam Registration",             description: "Udyam/MSME registration certificate",          required: true },
-    { key: "itr_3years",        label: "Last 3 Years ITR + Audit Reports",description: "ITR, GST returns, P&L, Balance Sheet",        required: true },
-  ],
-  "loan_against_property__salaried": [
-    { key: "pan_card",         label: "PAN Card",                         description: "Clear copy of PAN card",                       required: true },
-    { key: "aadhaar_card",     label: "Aadhaar Card",                     description: "Clear copy of Aadhaar (front & back)",         required: true },
-    { key: "bank_statement",   label: "1-Year Bank Statement",            description: "Complete 12 months bank statement",            required: true },
-    { key: "passport_photo",   label: "Photo & ID Proof",                description: "Passport size photo",                          required: true },
-    { key: "co_applicant_kyc", label: "Co-Applicant KYC",                description: "Co-applicant PAN & Aadhaar",                   required: true },
-    { key: "property_paper",   label: "Property Papers",                 description: "All property ownership documents",             required: true },
-    { key: "salary_slip",      label: "Last 3 Months Salary Slips",      description: "Latest 3 months salary slips",                 required: true },
-    { key: "itr_3years",       label: "Last 3 Years ITR",                description: "ITR for last 3 financial years",               required: true },
-  ],
-  "loan_against_property__business": [
-    { key: "pan_card",         label: "PAN Card",                         description: "Clear copy of PAN card",                       required: true },
-    { key: "aadhaar_card",     label: "Aadhaar Card",                     description: "Clear copy of Aadhaar (front & back)",         required: true },
-    { key: "bank_statement",   label: "1-Year Bank Statement",            description: "Complete 12 months bank statement",            required: true },
-    { key: "passport_photo",   label: "Photo & ID Proof",                description: "Passport size photo",                          required: true },
-    { key: "co_applicant_kyc", label: "Co-Applicant KYC",                description: "Co-applicant PAN & Aadhaar",                   required: true },
-    { key: "property_paper",   label: "Property Papers",                 description: "All property ownership documents",             required: true },
-    { key: "itr_3years",       label: "Last 3 Years ITR + Audit Reports",description: "ITR, GST returns, P&L, Balance Sheet",         required: true },
-  ],
-  "vehicle_loan__salaried": [
-    { key: "pan_card",           label: "PAN Card",                        description: "Clear copy of PAN card",                     required: true },
-    { key: "aadhaar_card",       label: "Aadhaar Card",                    description: "Clear copy of Aadhaar (front & back)",       required: true },
-    { key: "bank_statement",     label: "1-Year Bank Statement",           description: "Complete 12 months bank statement",          required: true },
-    { key: "passport_photo",     label: "Photo & ID Proof",               description: "Passport size photo",                        required: true },
-    { key: "co_applicant_kyc",   label: "Co-Applicant KYC",               description: "Co-applicant PAN & Aadhaar",                 required: true },
-    { key: "itr_3years",         label: "Last 3 Years ITR",               description: "ITR for last 3 financial years",             required: true },
-    { key: "vehicle_details_doc",label: "Vehicle Details / Quotation",    description: "Vehicle quotation or RC book details",       required: true },
-  ],
-  "vehicle_loan__business": [
-    { key: "pan_card",           label: "PAN Card",                        description: "Clear copy of PAN card",                     required: true },
-    { key: "aadhaar_card",       label: "Aadhaar Card",                    description: "Clear copy of Aadhaar (front & back)",       required: true },
-    { key: "bank_statement",     label: "1-Year Bank Statement",           description: "Complete 12 months bank statement",          required: true },
-    { key: "passport_photo",     label: "Photo & ID Proof",               description: "Passport size photo",                        required: true },
-    { key: "co_applicant_kyc",   label: "Co-Applicant KYC",               description: "Co-applicant PAN & Aadhaar",                 required: true },
-    { key: "itr_3years",         label: "Last 3 Years ITR + Audit Reports",description: "ITR, GST returns, P&L, Balance Sheet",      required: true },
-    { key: "vehicle_details_doc",label: "Vehicle Details / Quotation",    description: "Vehicle quotation or RC book details",       required: true },
-  ],
+const formatTenure = (t: TenureOption) => {
+  if (t.display_name) return t.display_name;
+  if (t.tenure_months < 12) return `${t.tenure_months} Month${t.tenure_months > 1 ? "s" : ""}`;
+  const years = t.tenure_months / 12;
+  return Number.isInteger(years) ? `${years} Year${years > 1 ? "s" : ""}` : `${t.tenure_months} Months`;
 };
-
-const LOAN_SERVICES = [
-  { value: "personal_loan",         label: "Personal Loan",         icon: "👤" },
-  { value: "home_loan",             label: "Home Loan",             icon: "🏠" },
-  { value: "business_loan",         label: "Business Loan",         icon: "🏢" },
-  { value: "working_capital_loan",  label: "Working Capital Loan",  icon: "💼" },
-  { value: "loan_against_property", label: "Loan Against Property", icon: "🏗️" },
-  { value: "vehicle_loan",          label: "Vehicle Loan",          icon: "🚗" },
-];
-
 /* ─────────────────────────────────────────────
    PAGE
 ───────────────────────────────────────────── */
@@ -209,9 +92,17 @@ export default function CAApplyPage() {
     pincode: "", annual_income: "", vehicle_details: "",
   });
 
-  const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof FormData, string>>>({});
-  const [documents, setDocuments]     = useState<Partial<Record<DocKey, UploadedFile>>>({});
-  const [docErrors, setDocErrors]     = useState<Partial<Record<DocKey, string>>>({});
+ const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof FormData, string>>>({});
+  const [documents, setDocuments]     = useState<Record<number, UploadedFile>>({});
+  const [docErrors, setDocErrors]     = useState<Record<number, string>>({});
+
+  const [loanServices, setLoanServices]       = useState<LoanServiceOption[]>([]);
+  const [employmentTypes, setEmploymentTypes] = useState<EmploymentTypeOption[]>([]);
+  const [stateOptions, setStateOptions]       = useState<StateOption[]>([]);
+  const [tenureOptions, setTenureOptions]     = useState<TenureOption[]>([]);
+  const [documentTypes, setDocumentTypes]     = useState<DocumentTypeOption[]>([]);
+  const [tenuresLoading, setTenuresLoading]       = useState(false);
+  const [documentsLoading, setDocumentsLoading]   = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -226,12 +117,48 @@ export default function CAApplyPage() {
       .then(r => r.json())
       .then(d => { if (d.success) setBanks(d.data); })
       .catch(() => {});
+
+    fetch(`${CATALOG_API}/loan-services`)
+      .then(r => r.json())
+      .then(d => { if (d.success) setLoanServices(d.data); })
+      .catch(() => {});
+
+    fetch(`${CATALOG_API}/employment-types`)
+      .then(r => r.json())
+      .then(d => { if (d.success) setEmploymentTypes(d.data); })
+      .catch(() => {});
+
+    fetch(`${CATALOG_API}/states`)
+      .then(r => r.json())
+      .then(d => { if (d.success) setStateOptions(d.data); })
+      .catch(() => {});
   }, []);
 
-  useEffect(() => { setDocuments({}); setDocErrors({}); }, [formData.loan_service, formData.employment_type]);
+  useEffect(() => {
+    setDocuments({});
+    setDocErrors({});
+    setTenureOptions([]);
+    setDocumentTypes([]);
 
-  const docKey      = `${formData.loan_service}__${formData.employment_type}`;
-  const visibleDocs = DOC_MAP[docKey] || [];
+    if (!formData.loan_service) return;
+
+    setTenuresLoading(true);
+    fetch(`${CATALOG_API}/loan-tenures?loan_service_id=${formData.loan_service}`)
+      .then(r => r.json())
+      .then(d => { if (d.success) setTenureOptions(d.data); })
+      .catch(() => {})
+      .finally(() => setTenuresLoading(false));
+
+    setDocumentsLoading(true);
+    fetch(`${CATALOG_API}/document-types?loan_service_id=${formData.loan_service}`)
+      .then(r => r.json())
+      .then(d => { if (d.success) setDocumentTypes(d.data); })
+      .catch(() => {})
+      .finally(() => setDocumentsLoading(false));
+  }, [formData.loan_service]);
+
+  const selectedLoanServiceName =
+    loanServices.find(ls => String(ls.id) === formData.loan_service)?.name || "";
 
   /* ── VALIDATORS ── */
   const validators: Partial<Record<keyof FormData, (v: string) => string>> = {
@@ -265,27 +192,35 @@ export default function CAApplyPage() {
     if (e.key === "Enter") { e.preventDefault(); inputsRef.current[index + 1]?.focus(); }
   };
 
-  /* ── DOCUMENT UPLOAD ── */
-  const handleDocUpload = (key: DocKey, e: React.ChangeEvent<HTMLInputElement>) => {
+ /* ── DOCUMENT UPLOAD ── */
+  const handleDocUpload = (doc: DocumentTypeOption, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) { setDocErrors(p => ({ ...p, [key]: "Max 5MB" })); return; }
-    const allowed = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
-    if (!allowed.includes(file.type)) { setDocErrors(p => ({ ...p, [key]: "JPG, PNG or PDF only" })); return; }
+
+    const maxBytes = (doc.max_size_mb || 5) * 1024 * 1024;
+    if (file.size > maxBytes) { setDocErrors(p => ({ ...p, [doc.id]: `Max ${doc.max_size_mb}MB` })); return; }
+
+    const ext = file.name.split(".").pop()?.toLowerCase() || "";
+    const allowedExts = doc.allowed_file_types || ["pdf", "jpg", "jpeg", "png"];
+    if (!allowedExts.includes(ext)) {
+      setDocErrors(p => ({ ...p, [doc.id]: `${allowedExts.join(", ").toUpperCase()} only` }));
+      return;
+    }
+
     const reader = new FileReader();
     reader.onloadend = () => {
       setDocuments(p => ({
         ...p,
-        [key]: { name: file.name, size: file.size, type: file.type, dataUrl: reader.result as string,
+        [doc.id]: { name: file.name, size: file.size, type: file.type, dataUrl: reader.result as string,
           uploadedAt: new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) },
       }));
-      setDocErrors(p => ({ ...p, [key]: "" }));
+      setDocErrors(p => ({ ...p, [doc.id]: "" }));
     };
     reader.readAsDataURL(file);
   };
 
-  const removeDoc = (key: DocKey) => {
-    setDocuments(p => { const n = { ...p }; delete n[key]; return n; });
+  const removeDoc = (docId: number) => {
+    setDocuments(p => { const n = { ...p }; delete n[docId]; return n; });
   };
 
   /* ── STEP VALIDATION ── */
@@ -306,10 +241,10 @@ export default function CAApplyPage() {
       else { const v = validators[field]; if (v) { const msg = v(val); if (msg) { newErrors[field] = msg; hasError = true; } } }
     });
     if (s === 4 && !formData.loan_service) { newErrors.loan_service = "Please select a loan service"; hasError = true; }
-    if (s === 5) {
-      const newDocErrors: Partial<Record<DocKey, string>> = {};
-      visibleDocs.filter(d => d.required).forEach(d => {
-        if (!documents[d.key]) { newDocErrors[d.key] = "Required"; hasError = true; }
+   if (s === 5) {
+      const newDocErrors: Record<number, string> = {};
+      documentTypes.filter(d => d.is_required).forEach(d => {
+        if (!documents[d.id]) { newDocErrors[d.id] = "Required"; hasError = true; }
       });
       setDocErrors(newDocErrors);
     }
@@ -326,9 +261,12 @@ export default function CAApplyPage() {
     if (!token) { router.push("/"); return; }
     setLoading(true); setError("");
 
-    const documentMeta: Record<string, { name: string; uploadedAt: string; dataUrl: string }> = {};
-    Object.entries(documents).forEach(([key, file]) => {
-      if (file) documentMeta[key] = { name: file.name, uploadedAt: file.uploadedAt, dataUrl: file.dataUrl };
+const documentMeta: Record<string, { name: string; uploadedAt: string; dataUrl: string }> = {};
+    Object.entries(documents).forEach(([docId, file]) => {
+      if (!file) return;
+      const docConfig = documentTypes.find(d => d.id === Number(docId));
+      const key = docConfig ? slugify(docConfig.document_name) : `doc_${docId}`;
+      documentMeta[key] = { name: file.name, uploadedAt: file.uploadedAt, dataUrl: file.dataUrl };
     });
 
     try {
@@ -339,8 +277,9 @@ export default function CAApplyPage() {
           ...formData,
           pan_number: formData.pan.toUpperCase(),
           aadhaar_number: formData.aadhaar,
-          loan_service: formData.loan_service,
-          loan_type: formData.loan_service,
+          loan_service: selectedLoanServiceName,
+          loan_type: selectedLoanServiceName,
+          loan_service_id: formData.loan_service,
           documents: documentMeta,
         }),
       });
@@ -463,11 +402,12 @@ export default function CAApplyPage() {
             <>
               <FormSection title="Employment Details" subtitle="Customer employment and income information" icon="💼">
                 <TwoCol>
-                  <Field label="Employment Type" required error={fieldErrors.employment_type}>
+                 <Field label="Employment Type" required error={fieldErrors.employment_type}>
                     <SelectEl ref={setRef(4)} name="employment_type" value={formData.employment_type} onChange={handleChange}>
                       <option value="">Select type</option>
-                      <option value="salaried">Salaried</option>
-                      <option value="business">Business / Self Employed</option>
+                      {employmentTypes.map(et => (
+                        <option key={et.id} value={et.name}>{et.name}</option>
+                      ))}
                     </SelectEl>
                   </Field>
                   <Field label="Annual Income (₹)" required error={fieldErrors.annual_income}>
@@ -483,10 +423,12 @@ export default function CAApplyPage() {
                   <Field label="City" required error={fieldErrors.city}>
                     <InputEl ref={setRef(7)} onKeyDown={e => handleKeyDown(e, 7)} name="city" placeholder="City" value={formData.city} onChange={handleChange} icon={<FaBuilding />} />
                   </Field>
-                  <Field label="State" required error={fieldErrors.state}>
+                 <Field label="State" required error={fieldErrors.state}>
                     <SelectEl ref={setRef(8)} name="state" value={formData.state} onChange={handleChange}>
                       <option value="">Select State</option>
-                      {indianStates.map(st => <option key={st} value={st}>{st}</option>)}
+                      {stateOptions.map(st => (
+                        <option key={st.id} value={st.state_name}>{st.state_name}</option>
+                      ))}
                     </SelectEl>
                   </Field>
                   <Field label="Pincode" required error={fieldErrors.pincode}>
@@ -535,10 +477,12 @@ export default function CAApplyPage() {
           {/* ════ STEP 4 — Loan Details ════ */}
           {step === 4 && (
             <FormSection title="Loan Details" subtitle="Select loan service and enter amount details" icon="💰">
-              <Field label="Loan Service" required error={fieldErrors.loan_service}>
-                <SelectEl name="loan_service" value={formData.loan_service} onChange={e => { setFormData(p => ({ ...p, loan_service: e.target.value })); setFieldErrors(p => ({ ...p, loan_service: "" })); }}>
+           <Field label="Loan Service" required error={fieldErrors.loan_service}>
+                <SelectEl name="loan_service" value={formData.loan_service} onChange={e => { setFormData(p => ({ ...p, loan_service: e.target.value, tenure: "", vehicle_details: "" })); setFieldErrors(p => ({ ...p, loan_service: "" })); }}>
                   <option value="">Select loan service</option>
-                  {LOAN_SERVICES.map(ls => <option key={ls.value} value={ls.value}>{ls.icon} {ls.label}</option>)}
+                  {loanServices.map(ls => (
+                    <option key={ls.id} value={ls.id}>{ls.name}</option>
+                  ))}
                 </SelectEl>
               </Field>
               <TwoCol>
@@ -554,15 +498,17 @@ export default function CAApplyPage() {
                 <Field label="Loan Amount (₹)" required error={fieldErrors.loan_amount}>
                   <InputEl ref={setRef(16)} onKeyDown={e => handleKeyDown(e, 16)} name="loan_amount" placeholder="Min ₹10,000" value={formData.loan_amount} onChange={handleChange} icon={<FaMoneyBillWave />} />
                 </Field>
-                <Field label="Loan Tenure" required error={fieldErrors.tenure}>
-                  <SelectEl ref={setRef(17)} name="tenure" value={formData.tenure} onChange={handleChange}>
-                    <option value="">Select tenure</option>
-                    <option value="1">1 Year</option><option value="2">2 Years</option><option value="3">3 Years</option>
-                    <option value="5">5 Years</option><option value="7">7 Years</option><option value="10">10 Years</option>
-                    <option value="15">15 Years</option><option value="20">20 Years</option>
+              <Field label="Loan Tenure" required error={fieldErrors.tenure}>
+                  <SelectEl ref={setRef(17)} name="tenure" value={formData.tenure} onChange={handleChange} disabled={!formData.loan_service || tenuresLoading}>
+                    <option value="">
+                      {!formData.loan_service ? "Select loan service first" : tenuresLoading ? "Loading…" : "Select tenure"}
+                    </option>
+                    {tenureOptions.map(t => (
+                      <option key={t.id} value={t.tenure_months / 12}>{formatTenure(t)}</option>
+                    ))}
                   </SelectEl>
                 </Field>
-                {formData.loan_service === "vehicle_loan" && (
+                {selectedLoanServiceName.toLowerCase().includes("vehicle") && (
                   <Field label="Vehicle Details" required error={fieldErrors.vehicle_details}>
                     <InputEl ref={setRef(18)} onKeyDown={e => handleKeyDown(e, 18)} name="vehicle_details" placeholder="Make, Model, Year" value={formData.vehicle_details} onChange={handleChange} icon={<FaCar />} />
                   </Field>
@@ -582,40 +528,44 @@ export default function CAApplyPage() {
             </FormSection>
           )}
 
-          {/* ════ STEP 5 — Documents ════ */}
+{/* ════ STEP 5 — Documents ════ */}
           {step === 5 && (
-            <FormSection title="Upload Documents" subtitle="Upload customer documents based on loan type and employment" icon="📄">
-              {(!formData.loan_service || !formData.employment_type) && (
-                <div style={s.docWarning}>⚠️ Please complete Step 2 (Employment) and Step 4 (Loan Service) first.</div>
+            <FormSection title="Upload Documents" subtitle="Upload customer documents based on selected loan service" icon="📄">
+              {!formData.loan_service && (
+                <div style={s.docWarning}>⚠️ Please complete Step 4 (Loan Service) first.</div>
               )}
-              {visibleDocs.length > 0 && (
+              {formData.loan_service && documentsLoading && (
+                <div style={{ fontSize: 13, color: "#94a3b8", padding: "20px 0", textAlign: "center" as const }}>Loading required documents…</div>
+              )}
+              {formData.loan_service && !documentsLoading && documentTypes.length > 0 && (
                 <>
                   <div style={s.docBanner}>
                     <FaUpload size={14} color="#0369a1" style={{ flexShrink: 0 }} />
                     <div style={{ fontSize: 13, color: "#0284c7" }}>
-                      <strong>{LOAN_SERVICES.find(l => l.value === formData.loan_service)?.label}</strong> — {formData.employment_type === "salaried" ? "Salaried" : "Business / Self Employed"} · JPG, PNG, PDF · Max 5MB · * = required
+                      <strong>{selectedLoanServiceName}</strong> · Allowed types and max size vary per document · * = required
                     </div>
                   </div>
                   <div className="ca-doc-grid" style={s.docGrid}>
-                    {visibleDocs.map(doc => {
-                      const uploaded = documents[doc.key];
-                      const err      = docErrors[doc.key];
+                    {documentTypes.map(doc => {
+                      const uploaded = documents[doc.id];
+                      const err      = docErrors[doc.id];
                       const isPdf    = uploaded?.type === "application/pdf";
+                      const allowedExts = doc.allowed_file_types || ["pdf", "jpg", "jpeg", "png"];
                       return (
-                        <div key={doc.key} style={{ ...s.docCard, borderColor: err ? "#fca5a5" : uploaded ? "#86efac" : "#d1d5db", background: uploaded ? "#f0fdf4" : "#fff" }}>
+                        <div key={doc.id} style={{ ...s.docCard, borderColor: err ? "#fca5a5" : uploaded ? "#86efac" : "#d1d5db", background: uploaded ? "#f0fdf4" : "#fff" }}>
                           <div style={s.docCardTop}>
                             <div style={{ flex: 1 }}>
-                              <div style={s.docLabel}>{doc.label}{doc.required && <span style={{ color: "#ef4444" }}> *</span>}</div>
-                              <div style={s.docDesc}>{doc.description}</div>
+                              <div style={s.docLabel}>{doc.document_name}{doc.is_required && <span style={{ color: "#ef4444" }}> *</span>}</div>
+                              <div style={s.docDesc}>{allowedExts.join(", ").toUpperCase()} · Max {doc.max_size_mb}MB</div>
                             </div>
-                            {uploaded && <button style={s.docRemove} onClick={() => removeDoc(doc.key)}><FaTrash size={11} /></button>}
+                            {uploaded && <button style={s.docRemove} onClick={() => removeDoc(doc.id)}><FaTrash size={11} /></button>}
                           </div>
                           {uploaded ? (
                             <div style={{ display: "flex", flexDirection: "column" as const, gap: 8 }}>
                               {isPdf ? (
                                 <div style={s.pdfPreview}><FaFilePdf size={24} color="#ef4444" /><span style={s.docFileName}>{uploaded.name}</span></div>
                               ) : (
-                                <img src={uploaded.dataUrl} alt={doc.label} style={s.docImg} />
+                                <img src={uploaded.dataUrl} alt={doc.document_name} style={s.docImg} />
                               )}
                               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                                 <FaCheckCircle size={11} color="#10b981" />
@@ -626,10 +576,10 @@ export default function CAApplyPage() {
                             </div>
                           ) : (
                             <label style={s.docUploadArea}>
-                              <input type="file" accept=".jpg,.jpeg,.png,.webp,.pdf" style={{ display: "none" }} onChange={e => handleDocUpload(doc.key, e)} />
+                              <input type="file" accept={allowedExts.map(t => `.${t}`).join(",")} style={{ display: "none" }} onChange={e => handleDocUpload(doc, e)} />
                               <FaFileImage size={22} color="#94a3b8" />
                               <span style={s.docUploadText}>Click to upload</span>
-                              <span style={s.docUploadSub}>JPG, PNG, PDF · Max 5MB</span>
+                              <span style={s.docUploadSub}>{allowedExts.join(", ").toUpperCase()} · Max {doc.max_size_mb}MB</span>
                             </label>
                           )}
                           {err && <div style={{ fontSize: 11, color: "#dc2626" }}>{err}</div>}
@@ -846,12 +796,4 @@ const s: Record<string, React.CSSProperties> = {
   successFill: { width: "100%", height: "100%", background: "#10b981", borderRadius: 99, animation: "fill 2.5s linear forwards" },
 };
 
-const indianStates = [
-  "Andhra Pradesh","Arunachal Pradesh","Assam","Bihar","Chhattisgarh","Goa","Gujarat",
-  "Haryana","Himachal Pradesh","Jharkhand","Karnataka","Kerala","Madhya Pradesh",
-  "Maharashtra","Manipur","Meghalaya","Mizoram","Nagaland","Odisha","Punjab","Rajasthan",
-  "Sikkim","Tamil Nadu","Telangana","Tripura","Uttar Pradesh","Uttarakhand","West Bengal",
-  "Andaman and Nicobar Islands","Chandigarh","Dadra and Nagar Haveli and Daman and Diu",
-  "Delhi","Jammu and Kashmir","Ladakh","Lakshadweep","Puducherry",
-];
 
