@@ -1,14 +1,14 @@
-// Path: frontend/src/app/ca/loans/[id]/edit/page.tsx
+// Path: frontend/src/app/loans/[id]/edit/page.tsx
 "use client";
 
 import { useState, useEffect, useRef, forwardRef } from "react";
 import { useRouter, useParams } from "next/navigation";
 import {
-  FaUser, FaEnvelope, FaPhone, FaBuilding, FaMoneyBillWave,
-  FaCalendarAlt, FaFilePdf, FaFileImage, FaTrash, FaUpload,
-  FaLock, FaEye, FaArrowLeft, FaUserTie, FaIdCard, FaRegIdCard,
+  FaArrowLeft, FaUser, FaEnvelope, FaPhone,
+  FaBuilding, FaMoneyBillWave, FaCalendarAlt, FaFilePdf,
+  FaFileImage, FaTrash, FaUpload, FaLock, FaEye,
 } from "react-icons/fa";
-import CALayout from "../../../../../components/layout/ca/CALayout";
+import CustomerLayout from "../../../../components/layout/customer/CustomerLayout";
 
 /* ─────────────────────────────────────────────
    TYPES
@@ -35,23 +35,39 @@ interface FormData {
   co_applicant_pan: string;
 }
 
-// A document already saved on the server (loaded on page open)
-interface ExistingFile {
+interface UploadedFile {
   name: string;
-  url: string;       // could be a dataUrl OR a server path, we normalize below
+  url: string;
   uploadedAt?: string;
 }
 
-// A file freshly picked in this session, not yet saved
 interface PendingFile {
-  name: string; size: number; type: string;
-  dataUrl: string; uploadedAt: string;
+  name: string;
+  file: File;
+  previewUrl: string;
 }
 
-interface LoanServiceOption { id: number; name: string; }
-interface EmploymentTypeOption { id: number; name: string; }
-interface StateOption { id: number; state_name: string; }
-interface TenureOption { id: number; tenure_months: number; display_name: string | null; }
+interface LoanServiceOption {
+  id: number;
+  name: string;
+}
+
+interface EmploymentTypeOption {
+  id: number;
+  name: string;
+}
+
+interface StateOption {
+  id: number;
+  state_name: string;
+}
+
+interface TenureOption {
+  id: number;
+  tenure_months: number;
+  display_name: string | null;
+}
+
 interface DocumentTypeOption {
   id: number;
   document_name: string;
@@ -72,26 +88,21 @@ const formatTenure = (t: TenureOption) => {
   return Number.isInteger(years) ? `${years} Year${years > 1 ? "s" : ""}` : `${t.tenure_months} Months`;
 };
 
-const isPdfByNameOrType = (name?: string, type?: string) =>
-  (type ? type === "application/pdf" : false) || (name ? name.toLowerCase().endsWith(".pdf") : false);
+const isPdfFile = (name: string) => name.toLowerCase().endsWith(".pdf");
 
-/* ─────────────────────────────────────────────
-   HELPER: normalize whatever shape the backend
-   sends "documents" in, into a { [slugifiedName]: ExistingFile } map.
-───────────────────────────────────────────── */
-function normalizeDocuments(raw: any): Record<string, ExistingFile> {
-  const result: Record<string, ExistingFile> = {};
+/* Normalizes whatever the backend has saved for `documents` into a
+   { [slugifiedDocName]: UploadedFile } map. */
+function normalizeDocuments(raw: any): Record<string, UploadedFile> {
+  const result: Record<string, UploadedFile> = {};
   if (!raw) return result;
 
-  const extract = (obj: any): ExistingFile | null => {
+  const extract = (obj: any): UploadedFile | null => {
     if (!obj || typeof obj !== "object") return null;
     const url =
-      obj.dataUrl || obj.url || obj.filePath || obj.file_path ||
-      obj.path || obj.fileUrl || obj.file_url || "";
+      obj.url || obj.file_path || obj.path || obj.filePath || obj.fileUrl || obj.file_url || obj.dataUrl || "";
     const name =
       obj.name || obj.file_name || obj.filename || obj.fileName ||
-      (typeof url === "string" && !url.startsWith("data:") ? url.split("/").pop() : "") ||
-      "Document";
+      (typeof url === "string" && !url.startsWith("data:") ? url.split("/").pop() : "") || "Document";
     if (!url) return null;
     return { name, url, uploadedAt: obj.uploadedAt || obj.uploaded_at || obj.createdAt };
   };
@@ -121,38 +132,50 @@ function normalizeDocuments(raw: any): Record<string, ExistingFile> {
 }
 
 /* Loose fallback matcher: if the exact slug of a document type name
-   doesn't match any saved key, try a fuzzy word-overlap match. */
+   doesn't match any saved key (e.g. this application was submitted
+   before this document type existed, or names differ slightly),
+   try to find a saved key that shares meaningful words with it. */
 function findExistingDoc(
   doc: DocumentTypeOption,
-  existingDocuments: Record<string, ExistingFile>
-): ExistingFile | undefined {
+  existingDocuments: Record<string, UploadedFile>
+): UploadedFile | undefined {
   const exactKey = slugify(doc.document_name);
   if (existingDocuments[exactKey]) return existingDocuments[exactKey];
 
   const docWords = exactKey.split("_").filter(w => w.length > 2);
+  let bestMatch: UploadedFile | undefined;
+
   for (const [savedKey, savedDoc] of Object.entries(existingDocuments)) {
     const savedWords = savedKey.split("_").filter(w => w.length > 2);
-    if (docWords.some(w => savedWords.includes(w))) return savedDoc;
+    const overlap = docWords.filter(w => savedWords.includes(w));
+    if (overlap.length > 0) {
+      bestMatch = savedDoc;
+      break;
+    }
   }
-  return undefined;
+  return bestMatch;
 }
 
 /* ─────────────────────────────────────────────
    PAGE
 ───────────────────────────────────────────── */
-export default function CAEditPage() {
+export default function CustomerEditPage() {
   const router = useRouter();
   const params = useParams();
   const id     = params?.id as string;
 
-  const [loading, setLoading]   = useState(true);
-  const [saving, setSaving]     = useState(false);
-  const [error, setError]       = useState("");
-  const [success, setSuccess]   = useState("");
-  const [banks, setBanks]       = useState<any[]>([]);
-const [userName, setUserName] = useState("CA");
-  const [caInfo, setCaInfo]     = useState({ name: "", firm: "" });
+  const [loading, setLoading]     = useState(true);
+  const [saving, setSaving]       = useState(false);
+  const [error, setError]         = useState("");
+  const [success, setSuccess]     = useState("");
+  const [banks, setBanks]         = useState<any[]>([]);
+  const [userName, setUserName]   = useState("User");
+  const [userEmail, setUserEmail] = useState("");
+  const [appStatus, setAppStatus] = useState("");
   const [applicationNumber, setApplicationNumber] = useState("");
+
+  const [existingDocuments, setExistingDocuments] = useState<Record<string, UploadedFile>>({});
+  const [replacedDocuments, setReplacedDocuments] = useState<Record<number, PendingFile>>({});
 
   const [loanServices, setLoanServices]       = useState<LoanServiceOption[]>([]);
   const [employmentTypes, setEmploymentTypes] = useState<EmploymentTypeOption[]>([]);
@@ -162,8 +185,10 @@ const [userName, setUserName] = useState("CA");
   const [tenuresLoading, setTenuresLoading]       = useState(false);
   const [documentsLoading, setDocumentsLoading]   = useState(false);
 
+  const isPending = appStatus === "pending";
+
   const inputsRef = useRef<(HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null)[]>([]);
-  const setRef    = (i: number) =>
+  const setRef = (i: number) =>
     (el: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null): void => {
       inputsRef.current[i] = el;
     };
@@ -177,10 +202,6 @@ const [userName, setUserName] = useState("CA");
     co_applicant_name: "", co_applicant_aadhaar: "", co_applicant_pan: "",
   });
 
- // Documents already on the server, loaded when the page opens
-  const [existingDocuments, setExistingDocuments] = useState<Record<string, ExistingFile>>({});
-  // Documents freshly picked in this session to replace an existing one (not yet saved)
-  const [documents, setDocuments] = useState<Record<number, PendingFile>>({});
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof FormData, string>>>({});
 
   useEffect(() => {
@@ -188,15 +209,20 @@ const [userName, setUserName] = useState("CA");
     if (!token) { router.push("/"); return; }
     try {
       const user = JSON.parse(localStorage.getItem("user") || "{}");
-      if (user.role !== "ca") { router.push("/dashboard"); return; }
-      setUserName(user.full_name || "CA");
+      setUserName(user.full_name || "User");
+      setUserEmail(user.email || "");
     } catch {}
     fetchApplication(token);
     fetchBanks();
 
     fetch(`${CATALOG_API}/loan-services`)
       .then(r => r.json())
-      .then(d => { if (d.success) setLoanServices(d.data); })
+      .then(d => {
+        if (d.success) {
+          console.log("[EditPage] loanServices loaded:", d.data);
+          setLoanServices(d.data);
+        }
+      })
       .catch(() => {});
 
     fetch(`${CATALOG_API}/employment-types`)
@@ -208,16 +234,21 @@ const [userName, setUserName] = useState("CA");
       .then(r => r.json())
       .then(d => { if (d.success) setStateOptions(d.data); })
       .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  // Resolve the selected loan service — stored value may be a name/slug OR a raw id.
+
+
   const selectedLoanService = loanServices.find(ls => {
     if (String(ls.id) === formData.loan_service) return true;
     if (ls.name === formData.loan_service) return true;
     if (slugify(ls.name) === slugify(formData.loan_service)) return true;
     return false;
   });
+
+  useEffect(() => {
+    console.log("[EditPage] formData.loan_service:", formData.loan_service);
+    console.log("[EditPage] selectedLoanService match:", selectedLoanService);
+  }, [formData.loan_service, selectedLoanService]);
 
   useEffect(() => {
     setTenureOptions([]);
@@ -227,74 +258,91 @@ const [userName, setUserName] = useState("CA");
     setTenuresLoading(true);
     fetch(`${CATALOG_API}/loan-tenures?loan_service_id=${selectedLoanService.id}`)
       .then(r => r.json())
-      .then(d => { if (d.success) setTenureOptions(d.data); })
+      .then(d => {
+        if (d.success) {
+          console.log("[EditPage] tenureOptions loaded:", d.data);
+          setTenureOptions(d.data);
+        }
+      })
       .catch(() => {})
       .finally(() => setTenuresLoading(false));
 
     setDocumentsLoading(true);
     fetch(`${CATALOG_API}/document-types?loan_service_id=${selectedLoanService.id}`)
       .then(r => r.json())
-      .then(d => { if (d.success) setDocumentTypes(d.data); })
+      .then(d => {
+        if (d.success) {
+          console.log("[EditPage] documentTypes loaded:", d.data);
+          setDocumentTypes(d.data);
+        }
+      })
       .catch(() => {})
       .finally(() => setDocumentsLoading(false));
   }, [selectedLoanService?.id]);
 
+  useEffect(() => {
+    return () => {
+      Object.values(replacedDocuments).forEach(doc => {
+        if (doc?.previewUrl) URL.revokeObjectURL(doc.previewUrl);
+      });
+    };
+  }, [replacedDocuments]);
+
   const fetchApplication = async (token: string) => {
     try {
       setLoading(true);
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/ca/loans/${id}`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/loan/applications/${id}`,{
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.status === 401) { localStorage.removeItem("token"); router.push("/"); return; }
       const data = await res.json();
 
-      console.log("[CA EditPage] full application response:", data);
-
       if (data.success) {
         const app = data.data;
+        setAppStatus(app.status);
+        setApplicationNumber(app.application_number || "");
 
         const rawDocs =
           app.documents ?? app.documents_data ?? app.uploaded_documents ??
           app.docs ?? app.files ?? null;
-        console.log("[CA EditPage] raw documents field:", rawDocs);
+
+        console.log("[EditPage] raw documents from API:", rawDocs);
 
         const normalized = normalizeDocuments(rawDocs);
-        console.log("[CA EditPage] normalized documents:", normalized);
+        console.log("[EditPage] normalized existingDocuments (keys):", Object.keys(normalized));
         setExistingDocuments(normalized);
 
         if (app.status !== "pending") {
-          router.push(`/ca/loans/${id}`);
+          router.push(`/loans/${id}`);
           return;
         }
 
-        setCaInfo({ name: app.ca_name || "", firm: app.ca_firm || "" });
-        setApplicationNumber(app.application_number || "");
-setFormData({
-  full_name:           app.full_name          || "",
-  email:               app.email              || "",
-  mobile:              app.mobile             || "",
-  dob:                 app.dob ? app.dob.split("T")[0] : "",
-  employment_type:     app.employment_type    || "",
-  annual_income:       app.annual_income      ? String(app.annual_income) : "",
-  address:             app.address            || "",
-  city:                app.city               || "",
-  state:               app.state              || "",
-  pincode:             app.pincode            || "",
-  bank_id:             app.bank_id            || "",
-  loan_service:        app.loan_service || app.loan_type || "",  // ✅ prefer loan_service, fall back to loan_type
-  loan_amount:         app.loan_amount        ? String(app.loan_amount) : "",
-  tenure:              app.tenure             || "",
-  loan_purpose:        app.loan_purpose       || "",
-  vehicle_details:     app.vehicle_details    || "",
-  co_applicant_name:   app.co_applicant_name  || "",
-  co_applicant_aadhaar:app.co_applicant_aadhaar || "",
-  co_applicant_pan:    app.co_applicant_pan   || "",
-});
+        setFormData({
+          full_name:           app.full_name          || "",
+          email:               app.email              || "",
+          mobile:              app.mobile             || "",
+          dob:                 app.dob ? app.dob.split("T")[0] : "",
+          employment_type:     app.employment_type    || "",
+          annual_income:       app.annual_income      ? String(app.annual_income) : "",
+          address:             app.address            || "",
+          city:                app.city               || "",
+          state:               app.state              || "",
+          pincode:             app.pincode            || "",
+          bank_id:             app.bank_id            || "",
+          loan_service:        app.loan_type          || "",
+          loan_amount:         app.loan_amount        ? String(app.loan_amount) : "",
+          tenure:              app.tenure             || "",
+          loan_purpose:        app.loan_purpose       || "",
+          vehicle_details:     app.vehicle_details    || "",
+          co_applicant_name:   app.co_applicant_name  || "",
+          co_applicant_aadhaar:app.co_applicant_aadhaar || "",
+          co_applicant_pan:    app.co_applicant_pan   || "",
+        });
       } else {
         setError(data.message || "Failed to load application.");
       }
     } catch (err) {
-      console.error("[CA EditPage] fetchApplication error:", err);
+      console.error("[EditPage] fetchApplication error:", err);
       setError("Server error.");
     } finally {
       setLoading(false);
@@ -319,8 +367,8 @@ setFormData({
     if (e.key === "Enter") { e.preventDefault(); inputsRef.current[index + 1]?.focus(); }
   };
 
-  /* ── DOCUMENT UPLOAD (replace) ── */
   const handleDocUpload = (doc: DocumentTypeOption, e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!isPending) return;
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -334,72 +382,37 @@ setFormData({
       return;
     }
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setDocuments(p => ({
-        ...p,
-        [doc.id]: {
-          name: file.name, size: file.size, type: file.type,
-          dataUrl: reader.result as string,
-          uploadedAt: new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
-        },
-      }));
-    };
-    reader.readAsDataURL(file);
+    const prev = replacedDocuments[doc.id];
+    if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+
+    const previewUrl = URL.createObjectURL(file);
+    setReplacedDocuments(p => ({
+      ...p,
+      [doc.id]: { name: file.name, file, previewUrl },
+    }));
+
     e.target.value = "";
   };
 
-  const removeDoc = (docId: number) => {
-    setDocuments(p => { const n = { ...p }; delete n[docId]; return n; });
-  };
-
-  const dataUrlToBlobUrl = (dataUrl: string): string => {
-    const [header, base64] = dataUrl.split(",");
-    const mimeMatch = header.match(/data:(.*?);base64/);
-    const mime = mimeMatch ? mimeMatch[1] : "application/octet-stream";
-
-    const byteChars = atob(base64);
-    const byteNumbers = new Array(byteChars.length);
-    for (let i = 0; i < byteChars.length; i++) {
-      byteNumbers[i] = byteChars.charCodeAt(i);
-    }
-    const byteArray = new Uint8Array(byteNumbers);
-    const blob = new Blob([byteArray], { type: mime });
-    return URL.createObjectURL(blob);
+  const cancelReplace = (docId: number) => {
+    setReplacedDocuments(p => {
+      const n = { ...p };
+      const doc = n[docId];
+      if (doc?.previewUrl) URL.revokeObjectURL(doc.previewUrl);
+      delete n[docId];
+      return n;
+    });
   };
 
   const openDoc = (url: string) => {
-    if (!url) {
-      alert("This document could not be opened — no file data found.");
-      return;
-    }
-
-    try {
-      if (url.startsWith("data:")) {
-        const blobUrl = dataUrlToBlobUrl(url);
-        const win = window.open(blobUrl, "_blank", "noopener,noreferrer");
-        if (!win) {
-          alert("Popup blocked. Please allow popups for this site to view documents.");
-        }
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
-        return;
-      }
-
-      const fullUrl =
-        url.startsWith("http") || url.startsWith("blob:")
-          ? url
-          : `${process.env.NEXT_PUBLIC_API_URL}${url.startsWith("/") ? url : `/${url}`}`;
-      const win = window.open(fullUrl, "_blank", "noopener,noreferrer");
-      if (!win) {
-        alert("Popup blocked. Please allow popups for this site to view documents.");
-      }
-    } catch (err) {
-      console.error("[CA EditPage] openDoc error:", err);
-      alert("Could not open this document.");
-    }
+    if (!url) return;
+    const fullUrl =
+      url.startsWith("http") || url.startsWith("blob:") || url.startsWith("data:")
+        ? url
+        : `${process.env.NEXT_PUBLIC_API_URL}${url.startsWith("/") ? url : `/${url}`}`;
+    window.open(fullUrl, "_blank", "noopener,noreferrer");
   };
 
-  /* ── VALIDATE ── */
   const validate = (): boolean => {
     const errors: Partial<Record<keyof FormData, string>> = {};
     if (!formData.full_name)       errors.full_name       = "Required";
@@ -414,55 +427,58 @@ setFormData({
     return Object.keys(errors).length === 0;
   };
 
-  /* ── SUBMIT ── */
   const handleSubmit = async () => {
     if (!validate()) { setError("Please fix the errors below."); return; }
     const token = localStorage.getItem("token");
     if (!token) { router.push("/"); return; }
     setSaving(true); setError(""); setSuccess("");
 
- const mergedDocumentPayload: Record<string, { name: string; uploadedAt?: string; dataUrl?: string; url?: string }> = {};
-
-    // Keep any existing doc that hasn't been replaced this session
-    Object.entries(existingDocuments).forEach(([key, doc]) => {
-      if (doc) mergedDocumentPayload[key] = { name: doc.name, uploadedAt: doc.uploadedAt, url: doc.url };
-    });
-    // Overlay newly picked replacements, keyed by the current document type's slug
-    Object.entries(documents).forEach(([docId, file]) => {
-      if (!file) return;
-      const docConfig = documentTypes.find(d => d.id === Number(docId));
-      const key = docConfig ? slugify(docConfig.document_name) : `doc_${docId}`;
-      mergedDocumentPayload[key] = { name: file.name, uploadedAt: file.uploadedAt, dataUrl: file.dataUrl };
-    });
-
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/ca/loans/${id}`, {
+      const fd = new FormData();
+      Object.entries(formData).forEach(([k, v]) => fd.append(k, v ?? ""));
+
+      Object.entries(replacedDocuments).forEach(([docId, doc]) => {
+        if (!doc?.file) return;
+        const docConfig = documentTypes.find(d => d.id === Number(docId));
+        const key = docConfig ? slugify(docConfig.document_name) : `doc_${docId}`;
+        fd.append(key, doc.file, doc.file.name);
+      });
+
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/loan/applications/${id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          ...formData,
-          loan_service: selectedLoanService?.name || formData.loan_service,
-          documents: Object.keys(mergedDocumentPayload).length > 0 ? mergedDocumentPayload : undefined,
-        }),
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
       });
       const data = await res.json();
-      console.log("[CA EditPage] save response:", data);
 
       if (res.status === 400 && data.message?.includes("pending")) {
         setError("This application can no longer be edited.");
-        setTimeout(() => router.push(`/ca/loans/${id}`), 2000);
+        setTimeout(() => router.push(`/loans/${id}`), 2000);
         return;
       }
+
       if (data.success) {
         setSuccess("Application updated successfully!");
-        setExistingDocuments(normalizeDocuments(mergedDocumentPayload));
-        setDocuments({});
-        setTimeout(() => router.push(`/ca/loans/${id}`), 1500);
+
+        const rawDocs =
+          data.data?.documents ?? data.data?.documents_data ??
+          data.data?.uploaded_documents ?? data.data?.docs ?? data.data?.files ?? null;
+
+        if (rawDocs) {
+          setExistingDocuments(normalizeDocuments(rawDocs));
+        }
+
+        Object.values(replacedDocuments).forEach(doc => {
+          if (doc?.previewUrl) URL.revokeObjectURL(doc.previewUrl);
+        });
+        setReplacedDocuments({});
+
+        setTimeout(() => router.push(`/loans/${id}`), 1500);
       } else {
         setError(data.message || "Update failed.");
       }
     } catch (err) {
-      console.error("[CA EditPage] handleSubmit error:", err);
+      console.error("[EditPage] handleSubmit error:", err);
       setError("Server error. Try again.");
     } finally {
       setSaving(false);
@@ -470,7 +486,9 @@ setFormData({
   };
 
   const handleLogout = () => {
-    localStorage.removeItem("token"); localStorage.removeItem("user"); router.push("/");
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    router.push("/");
   };
 
   const fmt = (n: number) => "₹" + Number(n).toLocaleString("en-IN");
@@ -484,121 +502,127 @@ setFormData({
      RENDER
   ───────────────────────────────────────────── */
   return (
-    <CALayout s={s} userName={userName} handleLogout={handleLogout}>
-      <div className="ca-edit-wrap">
+    <CustomerLayout userName={userName} userEmail={userEmail} handleLogout={handleLogout}>
 
-        {/* Top Bar */}
-        <div style={s.topBar}>
-          <button style={s.backBtn} onClick={() => router.push(`/ca/loans/${id}`)}>
-            <FaArrowLeft size={12} /> Back to View
-          </button>
-          <h1 style={s.pageTitle}>Edit Application</h1>
-          <div style={s.pageSub}>
-            ID: <span style={{ fontFamily: "monospace", color: "#1e3a5f" }}>{applicationNumber || `SN-${id?.slice(0, 4).toUpperCase()}`}</span>
-            &nbsp;·&nbsp;
-            <span style={{ color: "#f59e0b", fontWeight: 600 }}>Pending — Editable</span>
-          </div>
+      {/* Top Bar */}
+      <div className="mb-4">
+        <button
+          onClick={() => router.push(`/loans/${id}`)}
+          className="flex items-center gap-1.5 bg-transparent text-slate-500 border-none pb-2 text-[13px] font-medium cursor-pointer"
+        >
+          <FaArrowLeft size={12} /> Back to View
+        </button>
+        <h1 className="text-xl sm:text-2xl font-extrabold text-slate-800 m-0">Edit Application</h1>
+        <div className="text-[13px] text-slate-400 mt-1">
+          ID: <span className="font-mono text-[#1e3a5f]">{applicationNumber || `SN-${id?.slice(0, 4).toUpperCase()}`}</span>
+          &nbsp;·&nbsp;
+          <span className="text-amber-500 font-semibold">Pending — Editable</span>
         </div>
+      </div>
 
-        {/* CA Filing Info Banner */}
-        <div style={s.caNotice}>
-          <FaUserTie size={14} color="#92400e" style={{ flexShrink: 0 }} />
-          <div style={{ fontSize: 13, color: "#92400e" }}>
-            <strong>CA Filing Mode</strong> — Changes made by <strong>{caInfo.name || userName}</strong>
-            {caInfo.firm ? ` · ${caInfo.firm}` : ""}. Your CA details remain linked to this application.
-          </div>
+      {/* KYC lock notice */}
+      <div className="flex items-center gap-2.5 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-4 text-[13px]">
+        <FaLock size={13} className="text-amber-800 shrink-0" />
+        <div className="text-amber-800">
+          <strong>Aadhaar and PAN cannot be edited</strong> after submission for security reasons. Contact support if you need to update KYC details.
         </div>
+      </div>
 
-        {/* KYC Lock Notice */}
-        <div style={s.lockNotice}>
-          <FaLock size={13} color="#92400e" style={{ flexShrink: 0 }} />
-          <div style={{ fontSize: 13, color: "#92400e" }}>
-            <strong>Aadhaar and PAN numbers cannot be edited</strong> after submission for security and compliance reasons. You may still replace the uploaded document images below.
-          </div>
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg text-sm mb-4">
+          ⚠️ {error}
         </div>
+      )}
+      {success && (
+        <div className="bg-green-50 border border-green-200 text-green-600 px-4 py-3 rounded-lg text-sm mb-4">
+          ✅ {success}
+        </div>
+      )}
 
-        {error   && <div style={s.errorBox}>⚠️ {error}</div>}
-        {success && <div style={s.successBox}>✅ {success}</div>}
+      {loading ? (
+        <div className="flex flex-col items-center gap-3.5 py-20">
+          <div className="w-8 h-8 border-4 border-slate-200 border-t-[#1e3a5f] rounded-full animate-spin" />
+          <div className="text-slate-400 text-sm">Loading…</div>
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl p-5 sm:p-8 md:p-9 shadow-sm">
 
-        {loading ? (
-          <div style={s.center}><div style={s.spinner} /><div style={s.mutedText}>Loading…</div></div>
-        ) : (
-          <div style={s.formCard} className="ca-form-card">
-
-            {/* ── SECTION 1: Customer Personal ── */}
-            <Section title="Customer Personal Details" icon="👤" subtitle="Update basic applicant information">
-              <TwoCol>
-                <Field label="Full Name" required error={fieldErrors.full_name}>
-                  <InputEl ref={setRef(0)} onKeyDown={e => handleKeyDown(e, 0)} name="full_name" value={formData.full_name} onChange={handleChange} placeholder="Full name" icon={<FaUser />} />
-                </Field>
-                <Field label="Date of Birth" error={fieldErrors.dob}>
-                  <InputEl ref={setRef(1)} onKeyDown={e => handleKeyDown(e, 1)} name="dob" type="date" value={formData.dob} onChange={handleChange} icon={<FaCalendarAlt />} />
-                </Field>
-                <Field label="Email Address" required error={fieldErrors.email}>
-                  <InputEl ref={setRef(2)} onKeyDown={e => handleKeyDown(e, 2)} name="email" type="email" value={formData.email} onChange={handleChange} placeholder="Email" icon={<FaEnvelope />} />
-                </Field>
-                <Field label="Mobile Number" required error={fieldErrors.mobile}>
-                  <InputEl ref={setRef(3)} onKeyDown={e => handleKeyDown(e, 3)} name="mobile" value={formData.mobile} onChange={handleChange} placeholder="10-digit mobile" maxLength={10} icon={<FaPhone />} />
-                </Field>
-              </TwoCol>
-            </Section>
-
-            {/* ── SECTION 2: Employment & Address ── */}
-            <Section title="Employment & Address" icon="💼" subtitle="Update employment and residential details">
-              <TwoCol>
-                <Field label="Employment Type" required error={fieldErrors.employment_type}>
-                  <SelectEl ref={setRef(4)} name="employment_type" value={formData.employment_type} onChange={handleChange}>
-                    <option value="">Select type</option>
-                    {employmentTypes.map(et => (
-                      <option key={et.id} value={et.name}>{et.name}</option>
-                    ))}
-                  </SelectEl>
-                </Field>
-                <Field label="Annual Income (₹)" error={fieldErrors.annual_income}>
-                  <InputEl ref={setRef(5)} onKeyDown={e => handleKeyDown(e, 5)} name="annual_income" value={formData.annual_income} onChange={handleChange} placeholder="Annual income" icon={<FaMoneyBillWave />} />
-                </Field>
-              </TwoCol>
-              <Field label="Full Address" error={fieldErrors.address}>
-                <textarea ref={setRef(6)} name="address" value={formData.address} onChange={handleChange}
-                  placeholder="House/Flat No, Street, Area" rows={3}
-                  style={{ ...s.input, height: "auto", resize: "vertical", paddingLeft: 14 }}
-                />
+          {/* ── SECTION 1: Personal ── */}
+          <Section title="Personal Details" icon="👤" subtitle="Update basic applicant information">
+            <TwoCol>
+              <Field label="Full Name" required error={fieldErrors.full_name}>
+                <InputEl ref={setRef(0)} onKeyDown={e => handleKeyDown(e, 0)} name="full_name" value={formData.full_name} onChange={handleChange} placeholder="Full name" icon={<FaUser />} />
               </Field>
-              <TwoCol>
-                <Field label="City" error={fieldErrors.city}>
-                  <InputEl ref={setRef(7)} onKeyDown={e => handleKeyDown(e, 7)} name="city" value={formData.city} onChange={handleChange} placeholder="City" icon={<FaBuilding />} />
-                </Field>
-               <Field label="State" error={fieldErrors.state}>
-                  <SelectEl ref={setRef(8)} name="state" value={formData.state} onChange={handleChange}>
-                    <option value="">Select State</option>
-                    {stateOptions.map(st => (
-                      <option key={st.id} value={st.state_name}>{st.state_name}</option>
-                    ))}
-                  </SelectEl>
-                </Field>
-                <Field label="Pincode" error={fieldErrors.pincode}>
-                  <InputEl ref={setRef(9)} onKeyDown={e => handleKeyDown(e, 9)} name="pincode" value={formData.pincode} onChange={handleChange} placeholder="Pincode" maxLength={6} icon={<FaBuilding />} />
-                </Field>
-              </TwoCol>
-            </Section>
+              <Field label="Date of Birth" error={fieldErrors.dob}>
+                <InputEl ref={setRef(1)} onKeyDown={e => handleKeyDown(e, 1)} name="dob" type="date" value={formData.dob} onChange={handleChange} icon={<FaCalendarAlt />} />
+              </Field>
+              <Field label="Email Address" required error={fieldErrors.email}>
+                <InputEl ref={setRef(2)} onKeyDown={e => handleKeyDown(e, 2)} name="email" type="email" value={formData.email} onChange={handleChange} placeholder="Email" icon={<FaEnvelope />} />
+              </Field>
+              <Field label="Mobile Number" required error={fieldErrors.mobile}>
+                <InputEl ref={setRef(3)} onKeyDown={e => handleKeyDown(e, 3)} name="mobile" value={formData.mobile} onChange={handleChange} placeholder="10-digit mobile" maxLength={10} icon={<FaPhone />} />
+              </Field>
+            </TwoCol>
+          </Section>
 
-            {/* ── SECTION 3: Co-Applicant ── */}
-            <Section title="Co-Applicant Details" icon="👥" subtitle="Update co-applicant information if applicable">
-              <TwoCol>
-                <Field label="Co-Applicant Name" error={fieldErrors.co_applicant_name}>
-                  <InputEl ref={setRef(10)} onKeyDown={e => handleKeyDown(e, 10)} name="co_applicant_name" value={formData.co_applicant_name} onChange={handleChange} placeholder="Co-applicant name" icon={<FaUser />} />
-                </Field>
-                <Field label="Co-Applicant Aadhaar" error={fieldErrors.co_applicant_aadhaar}>
-                  <InputEl ref={setRef(11)} onKeyDown={e => handleKeyDown(e, 11)} name="co_applicant_aadhaar" value={formData.co_applicant_aadhaar} onChange={handleChange} placeholder="12-digit Aadhaar" maxLength={12} icon={<FaUser />} />
-                </Field>
-                <Field label="Co-Applicant PAN" error={fieldErrors.co_applicant_pan}>
-                  <InputEl ref={setRef(12)} onKeyDown={e => handleKeyDown(e, 12)} name="co_applicant_pan" value={formData.co_applicant_pan} onChange={handleChange} placeholder="PAN number" maxLength={10} icon={<FaUser />} />
-                </Field>
-              </TwoCol>
-            </Section>
+          {/* ── SECTION 2: Employment & Address ── */}
+          <Section title="Employment & Address" icon="💼" subtitle="Update employment and residential details">
+            <TwoCol>
+              <Field label="Employment Type" required error={fieldErrors.employment_type}>
+                <SelectEl ref={setRef(4)} name="employment_type" value={formData.employment_type} onChange={handleChange}>
+                  <option value="">Select type</option>
+                  {employmentTypes.map(et => (
+                    <option key={et.id} value={et.name}>{et.name}</option>
+                  ))}
+                </SelectEl>
+              </Field>
+              <Field label="Annual Income (₹)" error={fieldErrors.annual_income}>
+                <InputEl ref={setRef(5)} onKeyDown={e => handleKeyDown(e, 5)} name="annual_income" value={formData.annual_income} onChange={handleChange} placeholder="Annual income" icon={<FaMoneyBillWave />} />
+              </Field>
+            </TwoCol>
+            <Field label="Full Address" error={fieldErrors.address}>
+              <textarea
+                ref={setRef(6) as any} name="address" value={formData.address} onChange={handleChange}
+                placeholder="House/Flat No, Street, Area" rows={3}
+                className="w-full border border-gray-200 rounded-lg py-2.5 px-3.5 text-sm text-slate-800 bg-gray-50 outline-none box-border resize-y focus:border-[#2d5986]"
+              />
+            </Field>
+            <TwoCol>
+              <Field label="City" error={fieldErrors.city}>
+                <InputEl ref={setRef(7)} onKeyDown={e => handleKeyDown(e, 7)} name="city" value={formData.city} onChange={handleChange} placeholder="City" icon={<FaBuilding />} />
+              </Field>
+              <Field label="State" error={fieldErrors.state}>
+                <SelectEl ref={setRef(8)} name="state" value={formData.state} onChange={handleChange}>
+                  <option value="">Select State</option>
+                  {stateOptions.map(st => (
+                    <option key={st.id} value={st.state_name}>{st.state_name}</option>
+                  ))}
+                </SelectEl>
+              </Field>
+              <Field label="Pincode" error={fieldErrors.pincode}>
+                <InputEl ref={setRef(9)} onKeyDown={e => handleKeyDown(e, 9)} name="pincode" value={formData.pincode} onChange={handleChange} placeholder="Pincode" maxLength={6} icon={<FaBuilding />} />
+              </Field>
+            </TwoCol>
+          </Section>
 
-            {/* ── SECTION 4: Loan Details ── */}
-            <Section title="Loan Details" icon="💰" subtitle="Update loan service and amount">
+          {/* ── SECTION 3: Co-Applicant ── */}
+          <Section title="Co-Applicant Details" icon="👥" subtitle="Update co-applicant information if applicable">
+            <TwoCol>
+              <Field label="Co-Applicant Name" error={fieldErrors.co_applicant_name}>
+                <InputEl ref={setRef(10)} onKeyDown={e => handleKeyDown(e, 10)} name="co_applicant_name" value={formData.co_applicant_name} onChange={handleChange} placeholder="Co-applicant name" icon={<FaUser />} />
+              </Field>
+              <Field label="Co-Applicant Aadhaar" error={fieldErrors.co_applicant_aadhaar}>
+                <InputEl ref={setRef(11)} onKeyDown={e => handleKeyDown(e, 11)} name="co_applicant_aadhaar" value={formData.co_applicant_aadhaar} onChange={handleChange} placeholder="12-digit Aadhaar" maxLength={12} icon={<FaUser />} />
+              </Field>
+              <Field label="Co-Applicant PAN" error={fieldErrors.co_applicant_pan}>
+                <InputEl ref={setRef(12)} onKeyDown={e => handleKeyDown(e, 12)} name="co_applicant_pan" value={formData.co_applicant_pan} onChange={handleChange} placeholder="PAN number" maxLength={10} icon={<FaUser />} />
+              </Field>
+            </TwoCol>
+          </Section>
+
+          {/* ── SECTION 4: Loan Details ── */}
+          <Section title="Loan Details" icon="💰" subtitle="Update loan service and amount">
+            <div className="mb-4">
               <Field label="Loan Service" required error={fieldErrors.loan_service}>
                 <SelectEl name="loan_service" value={formData.loan_service} onChange={handleChange}>
                   <option value="">Select loan service</option>
@@ -607,195 +631,175 @@ setFormData({
                   ))}
                 </SelectEl>
               </Field>
-              <TwoCol>
-                <Field label="Select Bank" required error={fieldErrors.bank_id}>
-                  <SelectEl ref={setRef(13)} name="bank_id" value={formData.bank_id} onChange={handleChange}>
-                    <option value="">Choose a bank</option>
-                    {banks.map((b: any) => <option key={b.id} value={b.id}>{b.bank_name}</option>)}
-                  </SelectEl>
+            </div>
+            <TwoCol>
+              <Field label="Select Bank" required error={fieldErrors.bank_id}>
+                <SelectEl ref={setRef(13)} name="bank_id" value={formData.bank_id} onChange={handleChange}>
+                  <option value="">Choose a bank</option>
+                  {banks.map((b: any) => <option key={b.id} value={b.id}>{b.bank_name}</option>)}
+                </SelectEl>
+              </Field>
+              <Field label="Loan Amount (₹)" required error={fieldErrors.loan_amount}>
+                <InputEl ref={setRef(14)} onKeyDown={e => handleKeyDown(e, 14)} name="loan_amount" value={formData.loan_amount} onChange={handleChange} placeholder="Min ₹10,000" icon={<FaMoneyBillWave />} />
+              </Field>
+              <Field label="Loan Tenure" required error={fieldErrors.tenure}>
+                <SelectEl ref={setRef(15)} name="tenure" value={formData.tenure} onChange={handleChange} disabled={!selectedLoanService || tenuresLoading}>
+                  <option value="">
+                    {!selectedLoanService ? "Select loan service first" : tenuresLoading ? "Loading…" : "Select tenure"}
+                  </option>
+                  {tenureOptions.map(t => (
+                    <option key={t.id} value={t.tenure_months / 12}>{formatTenure(t)}</option>
+                  ))}
+                </SelectEl>
+              </Field>
+              {formData.loan_service.toLowerCase().includes("vehicle") && (
+                <Field label="Vehicle Details" error={fieldErrors.vehicle_details}>
+                  <InputEl ref={setRef(16)} onKeyDown={e => handleKeyDown(e, 16)} name="vehicle_details" value={formData.vehicle_details} onChange={handleChange} placeholder="Make, Model, Year" icon={<FaBuilding />} />
                 </Field>
-                <Field label="Loan Amount (₹)" required error={fieldErrors.loan_amount}>
-                  <InputEl ref={setRef(14)} onKeyDown={e => handleKeyDown(e, 14)} name="loan_amount" value={formData.loan_amount} onChange={handleChange} placeholder="Min ₹10,000" icon={<FaMoneyBillWave />} />
-                </Field>
-               <Field label="Loan Tenure" required error={fieldErrors.tenure}>
-                  <SelectEl ref={setRef(15)} name="tenure" value={formData.tenure} onChange={handleChange} disabled={!selectedLoanService || tenuresLoading}>
-                    <option value="">
-                      {!selectedLoanService ? "Select loan service first" : tenuresLoading ? "Loading…" : "Select tenure"}
-                    </option>
-                    {tenureOptions.map(t => (
-                      <option key={t.id} value={t.tenure_months / 12}>{formatTenure(t)}</option>
-                    ))}
-                  </SelectEl>
-                </Field>
-                {formData.loan_service.toLowerCase().includes("vehicle") && (
-                  <Field label="Vehicle Details" error={fieldErrors.vehicle_details}>
-                    <InputEl ref={setRef(16)} onKeyDown={e => handleKeyDown(e, 16)} name="vehicle_details" value={formData.vehicle_details} onChange={handleChange} placeholder="Make, Model, Year" icon={<FaBuilding />} />
-                  </Field>
-                )}
-              </TwoCol>
-
-              {/* EMI Preview */}
-              {formData.loan_amount && formData.tenure && Number(formData.loan_amount) >= 10000 && (
-                <div style={s.emiBox}>
-                  <div style={s.emiTitle}>📊 Updated Loan Summary</div>
-                  <div className="ca-emi-grid" style={s.emiGrid}>
-                    <EmiItem label="Amount"  value={fmt(Number(formData.loan_amount))} />
-                    <EmiItem label="Tenure"  value={`${formData.tenure} Year${Number(formData.tenure) > 1 ? "s" : ""}`} />
-                    <EmiItem label="Est. EMI @ 12% p.a." value={`₹${calcEMI(Number(formData.loan_amount), 12, Number(formData.tenure))}`} highlight />
-                  </div>
-                </div>
               )}
-            </Section>
+            </TwoCol>
+
+            {formData.loan_amount && formData.tenure && Number(formData.loan_amount) >= 10000 && (
+              <div className="bg-linear-to-br from-sky-50 to-sky-100 border border-sky-200 rounded-xl px-4 sm:px-5 py-4 mt-4.5">
+                <div className="text-xs font-bold text-sky-700 mb-3">📊 Updated Loan Summary</div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                  <EmiItem label="Amount" value={fmt(Number(formData.loan_amount))} />
+                  <EmiItem label="Tenure" value={`${formData.tenure} Year${Number(formData.tenure) > 1 ? "s" : ""}`} />
+                  <EmiItem label="Est. EMI @ 12% p.a." value={`₹${calcEMI(Number(formData.loan_amount), 12, Number(formData.tenure))}`} highlight />
+                </div>
+              </div>
+            )}
+          </Section>
 
           {/* ── SECTION 5: Documents ── */}
-            <Section title="Documents" icon="📄" subtitle="View uploaded documents, or replace any of them">
-              <div style={s.docNotice}>
+          <Section
+            title="Documents"
+            icon="📄"
+            subtitle={isPending ? "View uploaded documents, or replace any of them" : "Documents are locked and cannot be changed"}
+          >
+            {isPending && (
+              <div className="bg-sky-50 border border-sky-200 text-sky-700 rounded-lg px-4 py-3 text-[13px] mb-4">
                 ℹ️ Click <strong>View</strong> to open a document, or <strong>Replace</strong> to upload a new file for that slot. Anything you don't touch stays as-is.
               </div>
+            )}
 
-              {documentsLoading && (
-                <div style={{ fontSize: 13, color: "#94a3b8", padding: "20px 0", textAlign: "center" as const }}>Loading documents…</div>
-              )}
+            {documentsLoading && (
+              <div className="text-sm text-slate-400 py-6 text-center">Loading documents…</div>
+            )}
 
-              <div className="ca-doc-grid" style={s.docGrid}>
-                {documentTypes.map(doc => {
-                  const pendingReplacement = documents[doc.id];
-                  const existing = findExistingDoc(doc, existingDocuments);
+            {!documentsLoading && documentTypes.length === 0 && selectedLoanService && (
+              <div className="text-sm text-slate-400 py-6 text-center">
+                No documents configured for this loan service yet.
+              </div>
+            )}
 
-                  const displayName = pendingReplacement?.name || existing?.name;
-                  const displayUrl  = pendingReplacement?.dataUrl || existing?.url;
-                  const displayType = pendingReplacement?.type;
-                  const hasDoc      = Boolean(displayName && displayUrl);
-                  const allowedExts = doc.allowed_file_types || ["pdf", "jpg", "jpeg", "png"];
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {documentTypes.map(doc => {
+                const pendingReplacement = replacedDocuments[doc.id];
+                const existing = findExistingDoc(doc, existingDocuments);
 
-                  const nameLower = doc.document_name.toLowerCase();
-                  const isKycKey = nameLower.includes("aadhaar") || nameLower.includes("pan");
+                const displayName = pendingReplacement?.name || existing?.name;
+                const displayUrl  = pendingReplacement?.previewUrl || existing?.url;
+                const hasDoc      = Boolean(displayName && displayUrl);
+                const allowedExts = doc.allowed_file_types || ["pdf", "jpg", "jpeg", "png"];
 
-                  return (
-                    <div
-                      key={doc.id}
-                      style={{
-                        ...s.docCard,
-                        borderColor: pendingReplacement ? "#fbbf24" : hasDoc ? "#86efac" : "#e2e8f0",
-                        background: pendingReplacement ? "#fffbeb" : hasDoc ? "#f0fdf4" : "#fff",
-                      }}
-                    >
-                      <div style={s.docLabel}>
-                        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          {isKycKey && (nameLower.includes("aadhaar")
-                            ? <FaIdCard size={13} color="#059669" />
-                            : <FaRegIdCard size={13} color="#0284c7" />)}
-                          {doc.document_name}{doc.is_required && <span style={{ color: "#ef4444" }}> *</span>}
+                return (
+                  <div
+                    key={doc.id}
+                    className={`border-[1.5px] border-dashed rounded-xl px-3.5 py-3 flex flex-col gap-2
+                      ${pendingReplacement ? "border-amber-400 bg-amber-50" : hasDoc ? "border-emerald-300 bg-emerald-50" : "border-slate-200 bg-white"}`}
+                  >
+                    <div className="text-xs font-semibold text-slate-700 flex flex-col gap-1">
+                      {doc.document_name}{doc.is_required && <span className="text-red-500"> *</span>}
+                      {pendingReplacement && (
+                        <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full normal-case w-fit">
+                          New file selected
                         </span>
-                        {pendingReplacement && <span style={s.replacePill}>New file selected</span>}
-                      </div>
-
-                      {hasDoc ? (
-                        <div style={{ display: "flex", flexDirection: "column" as const, gap: 8 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            {isPdfByNameOrType(displayName, displayType)
-                              ? <FaFilePdf size={16} color="#ef4444" />
-                              : <FaFileImage size={16} color="#6366f1" />
-                            }
-                            <span style={{ fontSize: 12.5, color: "#374151", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
-                              {displayName}
-                            </span>
-                          </div>
-
-                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" as const }}>
-                            <button type="button" style={s.viewBtn} onClick={() => openDoc(displayUrl!)}>
-                              <FaEye size={11} /> View
-                            </button>
-
-                            {!pendingReplacement && (
-                              <label style={s.replaceBtn}>
-                                <input
-                                  type="file"
-                                  accept={allowedExts.map(t => `.${t}`).join(",")}
-                                  style={{ display: "none" }}
-                                  onChange={e => handleDocUpload(doc, e)}
-                                />
-                                Replace
-                              </label>
-                            )}
-
-                            {pendingReplacement && (
-                              <button type="button" style={s.removeBtn} onClick={() => removeDoc(doc.id)}>
-                                <FaTrash size={11} /> Undo
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      ) : (
-                        <label style={s.uploadArea}>
-                          <input
-                            type="file"
-                            accept={allowedExts.map(t => `.${t}`).join(",")}
-                            style={{ display: "none" }}
-                            onChange={e => handleDocUpload(doc, e)}
-                          />
-                          <FaUpload size={15} color="#94a3b8" />
-                          <span style={{ fontSize: 12, color: "#64748b" }}>Click to upload</span>
-                        </label>
                       )}
                     </div>
-                  );
-                })}
-              </div>
-            </Section>
 
-            {/* ── SUBMIT ── */}
-            <div className="ca-submit-row" style={s.submitRow}>
-              <button style={s.cancelBtn} onClick={() => router.push(`/ca/loans/${id}`)}>
-                Cancel
-              </button>
-              <button onClick={handleSubmit} disabled={saving} style={{ ...s.saveBtn, opacity: saving ? 0.7 : 1 }}>
-                {saving ? "Saving…" : "Save Changes ✓"}
-              </button>
+                    {hasDoc ? (
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-2">
+                          {isPdfFile(displayName!)
+                            ? <FaFilePdf className="text-red-500" />
+                            : <FaFileImage className="text-blue-500" />
+                          }
+                          <span className="text-[12.5px] text-slate-800 truncate max-w-[150px]">{displayName}</span>
+                        </div>
+
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openDoc(displayUrl!)}
+                            className="flex items-center gap-1.5 bg-blue-600 text-white border-none px-2.5 py-1.5 rounded-md cursor-pointer text-xs font-semibold"
+                          >
+                            <FaEye size={11} /> View
+                          </button>
+
+                          {isPending && !pendingReplacement && (
+                            <label className="flex items-center gap-1.5 justify-center bg-slate-100 text-slate-600 border border-slate-300 px-2.5 py-1.5 rounded-md cursor-pointer text-xs font-semibold">
+                              <input
+                                type="file"
+                                accept={allowedExts.map(t => `.${t}`).join(",")}
+                                className="hidden"
+                                onChange={e => handleDocUpload(doc, e)}
+                              />
+                              Replace
+                            </label>
+                          )}
+
+                          {isPending && pendingReplacement && (
+                            <button
+                              type="button"
+                              onClick={() => cancelReplace(doc.id)}
+                              className="flex items-center gap-1.5 bg-red-50 border-none text-red-500 px-2.5 py-1.5 rounded-md cursor-pointer text-xs font-semibold shrink-0"
+                            >
+                              <FaTrash size={11} /> Undo
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ) : isPending ? (
+                      <label className="flex flex-col items-center gap-1.5 bg-slate-50 border-[1.5px] border-dashed border-slate-300 rounded-lg py-3.5 px-2 cursor-pointer">
+                        <input
+                          type="file"
+                          accept={allowedExts.map(t => `.${t}`).join(",")}
+                          className="hidden"
+                          onChange={e => handleDocUpload(doc, e)}
+                        />
+                        <FaUpload size={16} className="text-slate-400" />
+                        <span className="text-xs text-slate-500">Click to upload</span>
+                      </label>
+                    ) : (
+                      <div className="text-xs text-slate-400 italic">Not uploaded</div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
+          </Section>
 
+          {/* ── SUBMIT ── */}
+          <div className="flex flex-col-reverse sm:flex-row justify-end items-stretch sm:items-center gap-3 mt-7 pt-5 border-t border-slate-100">
+            <button
+              onClick={() => router.push(`/loans/${id}`)}
+              className="bg-slate-100 text-slate-600 border-none px-6 py-2.5 rounded-lg text-sm font-semibold cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSubmit}
+              disabled={saving}
+              className="bg-linear-to-br from-[#1e3a5f] to-[#2d5986] text-white border-none px-7 py-2.5 rounded-lg text-sm font-bold cursor-pointer disabled:opacity-70"
+            >
+              {saving ? "Saving…" : "Save Changes ✓"}
+            </button>
           </div>
-        )}
-      </div>
 
-      <style jsx>{`
-        .ca-edit-wrap {
-          width: 100%;
-        }
-
-        @media (max-width: 640px) {
-          .ca-form-card {
-            padding: 22px 16px !important;
-            border-radius: 14px !important;
-          }
-
-          .ca-emi-grid {
-            grid-template-columns: 1fr !important;
-            gap: 16px !important;
-          }
-
-          .ca-doc-grid {
-            grid-template-columns: 1fr !important;
-          }
-
-          .ca-submit-row {
-            flex-direction: column-reverse;
-            align-items: stretch !important;
-          }
-
-          .ca-submit-row button {
-            width: 100%;
-            justify-content: center;
-          }
-        }
-      `}</style>
-
-      <style jsx global>{`
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
-    </CALayout>
+        </div>
+      )}
+    </CustomerLayout>
   );
 }
 
@@ -804,12 +808,12 @@ setFormData({
 ───────────────────────────────────────────── */
 function Section({ title, subtitle, icon, children }: { title: string; subtitle: string; icon: string; children: React.ReactNode }) {
   return (
-    <div style={s.section}>
-      <div style={s.sectionHead}>
-        <span style={{ fontSize: 22 }}>{icon}</span>
+    <div className="mb-7">
+      <div className="flex items-start gap-3 mb-4.5 pb-3 border-b-2 border-slate-100">
+        <span className="text-xl">{icon}</span>
         <div>
-          <div style={s.sectionTitle}>{title}</div>
-          <div style={s.sectionSub}>{subtitle}</div>
+          <div className="text-[15px] font-extrabold text-slate-800">{title}</div>
+          <div className="text-[13px] text-slate-400 mt-0.5">{subtitle}</div>
         </div>
       </div>
       {children}
@@ -818,24 +822,30 @@ function Section({ title, subtitle, icon, children }: { title: string; subtitle:
 }
 
 function TwoCol({ children }: { children: React.ReactNode }) {
-  return <div style={s.twoCol}>{children}</div>;
+  return <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">{children}</div>;
 }
 
 function Field({ label, required, error, children }: { label: string; required?: boolean; error?: string; children: React.ReactNode }) {
   return (
-    <div style={s.field}>
-      <label style={s.fieldLabel}>{label}{required && <span style={{ color: "#ef4444" }}> *</span>}</label>
+    <div className="flex flex-col gap-1.5">
+      <label className="text-[13px] font-semibold text-gray-700">
+        {label}{required && <span className="text-red-500"> *</span>}
+      </label>
       {children}
-      {error && <span style={s.fieldError}>{error}</span>}
+      {error && <span className="text-xs text-red-600">{error}</span>}
     </div>
   );
 }
 
 const InputEl = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement> & { icon?: React.ReactNode }>(
-  ({ icon, style, ...props }, ref) => (
-    <div style={s.inputWrap}>
-      {icon && <span style={s.inputIcon}>{icon}</span>}
-      <input ref={ref as React.Ref<HTMLInputElement>} {...props} style={{ ...s.input, paddingLeft: icon ? "42px" : "14px", ...style }} />
+  ({ icon, className, ...props }, ref) => (
+    <div className="relative">
+      {icon && <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 text-[13px] pointer-events-none">{icon}</span>}
+      <input
+        ref={ref}
+        {...props}
+        className={`w-full border border-gray-200 rounded-lg py-2.5 ${icon ? "pl-10" : "pl-3.5"} pr-3.5 text-sm text-slate-800 bg-gray-50 outline-none box-border focus:border-[#2d5986] ${className ?? ""}`}
+      />
     </div>
   )
 );
@@ -843,91 +853,24 @@ InputEl.displayName = "InputEl";
 
 const SelectEl = forwardRef<HTMLSelectElement, React.SelectHTMLAttributes<HTMLSelectElement>>(
   ({ children, ...props }, ref) => (
-    <select ref={ref as React.Ref<HTMLSelectElement>} {...props} style={s.select}>{children}</select>
+    <select
+      ref={ref}
+      {...props}
+      className="w-full border border-gray-200 rounded-lg py-2.5 px-3.5 text-sm text-slate-800 bg-gray-50 outline-none box-border focus:border-[#2d5986]"
+    >
+      {children}
+    </select>
   )
 );
 SelectEl.displayName = "SelectEl";
 
 function EmiItem({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column" as const, gap: 4 }}>
-      <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>{label}</span>
-      <span style={{ fontWeight: 800, fontSize: highlight ? 20 : 17, color: highlight ? "#0369a1" : "#1e293b" }}>{value}</span>
+    <div className="flex flex-col gap-1">
+      <span className="text-[11px] text-slate-500 font-semibold uppercase tracking-wide">{label}</span>
+      <span className={`font-extrabold ${highlight ? "text-lg text-sky-700" : "text-[17px] text-slate-800"}`}>
+        {value}
+      </span>
     </div>
   );
 }
-
-/* ─────────────────────────────────────────────
-   STYLES
-───────────────────────────────────────────── */
-const s: Record<string, React.CSSProperties> = {
-  page:    { display: "flex", minHeight: "100vh", background: "#f1f5f9", fontFamily: "'Segoe UI', system-ui, sans-serif" },
-  sidebar: { width: 240, minHeight: "100vh", background: "linear-gradient(180deg,#1e3a5f 0%,#0f2340 100%)", display: "flex", flexDirection: "column", padding: "24px 14px" },
-  logo:     { display: "flex", alignItems: "center", gap: 10, paddingBottom: 16, borderBottom: "1px solid rgba(255,255,255,0.08)", marginBottom: 12, paddingLeft: 6 },
-  logoIcon: { width: 30, height: 30, background: "rgba(255,255,255,0.15)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" },
-  logoText: { color: "#fff", fontWeight: 800, fontSize: 17, letterSpacing: "-0.3px" },
-  caBadge:  { display: "flex", alignItems: "center", gap: 7, background: "rgba(251,191,36,0.15)", border: "1px solid rgba(251,191,36,0.3)", borderRadius: 8, padding: "6px 12px", marginBottom: 16 },
-  caBadgeText: { color: "#fbbf24", fontSize: 12, fontWeight: 700, letterSpacing: "0.05em" },
-  nav:      { display: "flex", flexDirection: "column", gap: 2, flex: 1 },
-  navLink:  { display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 9, fontSize: 14, fontWeight: 500, border: "none", cursor: "pointer", textAlign: "left" as const, width: "100%", background: "transparent", color: "rgba(255,255,255,0.65)" },
-  navLinkActive: { background: "rgba(255,255,255,0.15)", color: "#fff" },
-  navLabel: {},
-  sidebarUser: { display: "flex", alignItems: "center", gap: 10, padding: "14px 8px", borderTop: "1px solid rgba(255,255,255,0.08)", marginTop: 8 },
-  avatarCircle: { width: 34, height: 34, borderRadius: "50%", background: "rgba(255,255,255,0.2)", color: "#fff", fontSize: 15, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
-  userInfo: { overflow: "hidden" },
-  userName: { color: "#fff", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" as const, overflow: "hidden", textOverflow: "ellipsis" },
-  userRole: { color: "rgba(255,255,255,0.45)", fontSize: 11, marginTop: 2 },
-  logoutBtn:{ display: "flex", alignItems: "center", gap: 9, padding: "10px 12px", color: "rgba(255,255,255,0.5)", background: "transparent", border: "none", borderRadius: 9, fontSize: 13, cursor: "pointer", marginTop: 4, width: "100%" },
-  main:     { flex: 1, padding: "28px 32px", overflowY: "auto" as const, minWidth: 0 },
-  topBar:   { marginBottom: 16 },
-  backBtn:  { display: "flex", alignItems: "center", gap: 7, background: "transparent", color: "#64748b", border: "none", padding: "0 0 8px", fontSize: 13, cursor: "pointer", fontWeight: 500 },
-  pageTitle:{ fontSize: 22, fontWeight: 800, color: "#1e293b", margin: 0 },
-  pageSub:  { fontSize: 13, color: "#94a3b8", marginTop: 3 },
-  caNotice: { display: "flex", alignItems: "center", gap: 10, background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "12px 16px", marginBottom: 12, fontSize: 13, flexWrap: "wrap" as const },
-  lockNotice:{ display: "flex", alignItems: "center", gap: 10, background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 10, padding: "12px 16px", marginBottom: 16, fontSize: 13, flexWrap: "wrap" as const },
-  errorBox: { background: "#fef2f2", border: "1px solid #fecaca", color: "#dc2626", padding: "12px 16px", borderRadius: 10, fontSize: 14, marginBottom: 16 },
-  successBox:{ background: "#f0fdf4", border: "1px solid #bbf7d0", color: "#16a34a", padding: "12px 16px", borderRadius: 10, fontSize: 14, marginBottom: 16 },
-  formCard: { background: "#fff", borderRadius: 18, padding: "32px 36px", boxShadow: "0 4px 24px rgba(0,0,0,0.07)" },
-  section:  { marginBottom: 32 },
-  sectionHead:  { display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 18, paddingBottom: 12, borderBottom: "2px solid #f1f5f9" },
-  sectionTitle: { fontSize: 16, fontWeight: 800, color: "#1e293b" },
-  sectionSub:   { fontSize: 13, color: "#94a3b8", marginTop: 3 },
-  twoCol:   { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "16px 20px" },
-  field:    { display: "flex", flexDirection: "column" as const, gap: 6 },
-  fieldLabel:{ fontSize: 13, fontWeight: 600, color: "#374151" },
-  fieldError:{ fontSize: 12, color: "#dc2626" },
-  inputWrap: { position: "relative" as const },
-  inputIcon: { position: "absolute" as const, left: 13, top: "50%", transform: "translateY(-50%)", color: "#9ca3af", fontSize: 13, pointerEvents: "none" },
-  input:    { width: "100%", border: "1.5px solid #e5e7eb", borderRadius: 10, padding: "10px 14px", fontSize: 14, color: "#1e293b", background: "#f9fafb", outline: "none", boxSizing: "border-box" as const },
-  select:   { width: "100%", border: "1.5px solid #e5e7eb", borderRadius: 10, padding: "10px 14px", fontSize: 14, color: "#1e293b", background: "#f9fafb", outline: "none", appearance: "auto", boxSizing: "border-box" as const },
-  emiBox:   { background: "linear-gradient(135deg,#f0f9ff,#e0f2fe)", border: "1px solid #bae6fd", borderRadius: 12, padding: "16px 20px", marginTop: 18 },
-  emiTitle: { fontSize: 12, fontWeight: 700, color: "#0369a1", marginBottom: 12 },
-  emiGrid:  { display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14 },
-  docNotice:{ background: "#f0f9ff", border: "1px solid #bae6fd", color: "#0369a1", borderRadius: 10, padding: "12px 16px", fontSize: 13, marginBottom: 16 },
-  docGrid:  { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12 },
-  docCard:  { border: "1.5px dashed", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column" as const, gap: 8 },
-  docLabel: { fontSize: 12, fontWeight: 600, color: "#374151", textTransform: "capitalize" as const, display: "flex", flexDirection: "column" as const, gap: 4 },
-  replacePill: { fontSize: 10, fontWeight: 700, color: "#92400e", background: "#fef3c7", padding: "2px 8px", borderRadius: 20, textTransform: "none" as const, width: "fit-content" },
-  uploadArea:{ display: "flex", flexDirection: "column" as const, alignItems: "center", gap: 6, background: "#f8fafc", border: "1.5px dashed #cbd5e1", borderRadius: 8, padding: "14px 8px", cursor: "pointer" },
-  viewBtn: {
-    display: "flex", alignItems: "center", gap: 5,
-    background: "#2563eb", color: "#fff", border: "none",
-    padding: "6px 10px", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600,
-  },
-  replaceBtn: {
-    display: "flex", alignItems: "center", gap: 5, justifyContent: "center",
-    background: "#f1f5f9", color: "#475569", border: "1px solid #cbd5e1",
-    padding: "6px 10px", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600,
-  },
-  removeBtn: {
-    display: "flex", alignItems: "center", gap: 5,
-    background: "#fef2f2", border: "none", color: "#ef4444",
-    padding: "6px 10px", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600, flexShrink: 0,
-  },
-  submitRow:{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 12, marginTop: 28, paddingTop: 22, borderTop: "1px solid #f1f5f9" },
-  cancelBtn:{ background: "#f1f5f9", color: "#475569", border: "none", padding: "11px 24px", borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: "pointer" },
-  saveBtn:  { background: "linear-gradient(135deg,#1e3a5f,#2d5986)", color: "#fff", border: "none", padding: "11px 28px", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" },
-  center:   { display: "flex", flexDirection: "column" as const, alignItems: "center", gap: 14, padding: "80px 0" },
-  spinner:  { width: 34, height: 34, border: "3px solid #e2e8f0", borderTop: "3px solid #1e3a5f", borderRadius: "50%", animation: "spin 0.8s linear infinite" },
-  mutedText:{ color: "#94a3b8", fontSize: 14 },
-};
