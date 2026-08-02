@@ -321,19 +321,20 @@ const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof FormData, st
     });
 
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/loan/apply`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          ...formData,
-          pan_number: formData.pan.toUpperCase(),
-          aadhaar_number: formData.aadhaar,
-          loan_type: selectedLoanServiceName,
-          loan_purpose: selectedLoanServiceName,
-          loan_service_id: formData.loan_service,
-          documents: documentMeta,
-        }),
-      });
+ const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/loan/apply`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+  body: JSON.stringify({
+    ...formData,
+    loan_service: selectedLoanServiceName,   // ✅ send the readable name, not the raw id
+    loan_service_id: formData.loan_service,  // keep the id separately for relational lookups
+    pan_number: formData.pan.toUpperCase(),
+    aadhaar_number: formData.aadhaar,
+    loan_type: selectedLoanServiceName,
+    loan_purpose: selectedLoanServiceName,
+    documents: documentMeta,
+  }),
+});
       const data = await res.json();
       if (res.status === 401) { setError("Session expired."); setTimeout(() => router.push("/"), 1500); return; }
       if (data.success) { setSubmitted(true); setTimeout(() => router.push("/dashboard"), 2500); }
