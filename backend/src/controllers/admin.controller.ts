@@ -23,6 +23,16 @@ const expiresAt = new Date(
   Date.now() + 24 * 60 * 60 * 1000
 );
 
+// Fetches the current list of active role names from the roles table,
+// so createUser/updateUser accept any role added via the Role page
+// (e.g. "dsa") without needing a code change here.
+async function getValidRoles(): Promise<string[]> {
+  const result = await pool.query(
+    `SELECT role_name FROM roles WHERE is_active = true`
+  );
+  return result.rows.map((r) => r.role_name.toLowerCase());
+}
+
 
 export const getDashboardStats = async (req: Request, res: Response) => {
   try {
@@ -35,6 +45,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       totalUsers,
       totalCA,
       totalBanks,
+      totalDSA,
       recentApplications,
     ] = await Promise.all([
       pool.query(`SELECT COUNT(*) FROM loan_applications`),
@@ -70,31 +81,39 @@ export const getDashboardStats = async (req: Request, res: Response) => {
         WHERE LOWER(role) = 'ca'
       `),
 
-      pool.query(`SELECT COUNT(*) FROM banks`),
+     pool.query(`SELECT COUNT(*) FROM banks`),
 
       pool.query(`
-        SELECT
-          la.id,
-          u.full_name,
-          la.loan_type,
-          la.loan_amount,
-          la.tenure,
-          LOWER(COALESCE(la.status, 'pending')) AS status,
-          la.created_at,
-          b.bank_name,
-          CASE
-            WHEN LOWER(COALESCE(u.role, 'customer')) = 'ca' THEN 'ca'
-            ELSE 'customer'
-          END AS applied_by,
-          CASE
-            WHEN LOWER(COALESCE(u.role, '')) = 'ca' THEN u.full_name
-            ELSE NULL
-          END AS ca_name
-        FROM loan_applications la
-        LEFT JOIN users u ON la.user_id = u.id
-        LEFT JOIN banks b ON la.bank_id = b.id
-        ORDER BY la.created_at DESC
-        LIMIT 10
+        SELECT COUNT(*)
+        FROM users
+        WHERE LOWER(role) = 'dsa'
+      `),
+
+      pool.query(`
+     SELECT
+  la.id,
+  la.full_name,
+  la.loan_type,
+  la.loan_amount,
+  la.tenure,
+  LOWER(COALESCE(la.status, 'pending')) AS status,
+  la.created_at,
+  b.bank_name,
+
+  LOWER(COALESCE(la.applied_by, 'customer')) AS applied_by,
+
+  CASE
+    WHEN LOWER(COALESCE(la.applied_by, 'customer')) = 'ca'
+      THEN la.ca_name
+    WHEN LOWER(COALESCE(la.applied_by, 'customer')) = 'dsa'
+      THEN la.dsa_name
+    ELSE NULL
+  END AS agent_name
+
+FROM loan_applications la
+LEFT JOIN banks b ON la.bank_id = b.id
+ORDER BY la.created_at DESC
+LIMIT 10
       `),
     ]);
 
@@ -153,19 +172,37 @@ export const getApplicationById = async (req: Request, res: Response) => {
     const { id } = req.params;
 
     const applicationResult = await pool.query(
-      `
-      SELECT
-        la.*,
-        u.full_name AS user_name,
-        u.email AS user_email,
-        b.bank_name AS bank_name
-      FROM loan_applications la
-      LEFT JOIN users u ON la.user_id = u.id
-      LEFT JOIN banks b ON la.bank_id = b.id
-      WHERE la.id = $1
-      `,
-      [id]
-    );
+  `
+  SELECT
+    la.*,
+
+    u.full_name AS user_name,
+    u.email AS user_email,
+
+    b.bank_name AS bank_name,
+
+    dsa.full_name AS dsa_name,
+    dsa.email AS dsa_email,
+    dp.agency_name AS agency_name
+
+  FROM loan_applications la
+
+  LEFT JOIN users u 
+    ON la.user_id = u.id
+
+  LEFT JOIN banks b 
+    ON la.bank_id = b.id
+
+  LEFT JOIN users dsa
+    ON la.dsa_id = dsa.id
+
+  LEFT JOIN dsa_profiles dp
+    ON dp.user_id = dsa.id
+
+  WHERE la.id = $1
+  `,
+  [id]
+);
 
     if (applicationResult.rows.length === 0) {
       return res.status(404).json({
@@ -905,9 +942,9 @@ export const createUser = async (req: Request, res: Response) => {
       });
     }
 
-    const validRoles = ["admin", "customer", "ca"];
+   const validRoles = await getValidRoles();
 
-    if (!validRoles.includes(role)) {
+    if (!validRoles.includes(String(role).toLowerCase())) {
       return res.status(400).json({
         error: "Invalid role",
       });
@@ -1156,9 +1193,9 @@ export const updateUser = async (req: Request, res: Response) => {
       });
     }
 
-    const validRoles = ["admin", "customer", "ca"];
+   const validRoles = await getValidRoles();
 
-    if (!validRoles.includes(role)) {
+    if (!validRoles.includes(String(role).toLowerCase())) {
       return res.status(400).json({
         message: "Invalid role",
       });
@@ -1225,3 +1262,193 @@ export const updateUser = async (req: Request, res: Response) => {
 };
 
 
+export const getDSAById = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      `
+      SELECT
+          u.id,
+          u.full_name,
+          u.email,
+          u.mobile,
+          u.role,
+          u.is_active,
+dp.agency_name AS firm_name,
+dp.dsa_code AS membership_number,
+dp.empanelment_date AS enrollment_date,
+          dp.pan_number,
+          dp.aadhaar_number,
+          dp.office_address,
+          dp.city,
+          dp.state,
+          dp.pincode,
+          dp.certificate_path,
+          dp.profile_completed
+
+      FROM users u
+      LEFT JOIN dsa_profiles dp
+        ON dp.user_id = u.id
+
+      WHERE u.id = $1
+        AND u.role = 'dsa'
+      `,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "DSA not found",
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: result.rows[0],
+    });
+  } catch (err) {
+    console.error("Get DSA Error:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server Error",
+    });
+  }
+};
+
+export const updateDSA = async (req: Request, res: Response) => {
+  const client = await pool.connect();
+
+  try {
+    const { id } = req.params;
+
+    const {
+      full_name,
+      email,
+      mobile,
+      role,
+      agency_name,
+      dsa_code,
+      empanelment_date,
+      pan_number,
+      aadhaar_number,
+      office_address,
+      city,
+      state,
+      pincode,
+      certificate,
+    } = req.body;
+
+    // ── SERVER-SIDE VALIDATION ──
+    // This is what stops a bad/incomplete request from ever reaching
+    // the database and crashing with a NOT NULL violation.
+    const required: Record<string, unknown> = {
+      full_name,
+      email,
+      mobile,
+      agency_name,
+      dsa_code,
+      empanelment_date,
+      pan_number,
+      aadhaar_number,
+      office_address,
+      city,
+      state,
+      pincode,
+    };
+
+    const missing = Object.entries(required)
+      .filter(([, v]) => v === undefined || v === null || String(v).trim() === "")
+      .map(([k]) => k);
+
+    if (missing.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Missing required field(s): ${missing.join(", ")}`,
+      });
+    }
+
+    await client.query("BEGIN");
+
+    const userCheck = await client.query(
+      `SELECT id FROM users WHERE id = $1 AND role = 'dsa'`,
+      [id]
+    );
+
+    if (userCheck.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ success: false, message: "DSA not found" });
+    }
+
+    let certificatePath: string | null = null;
+
+    const existingProfile = await client.query(
+      `SELECT certificate_path FROM dsa_profiles WHERE user_id = $1`,
+      [id]
+    );
+
+    if (existingProfile.rowCount && existingProfile.rows[0].certificate_path) {
+      certificatePath = existingProfile.rows[0].certificate_path;
+    }
+
+    if (certificate?.dataUrl) {
+      certificatePath = certificate.dataUrl;
+    }
+
+    await client.query(
+      `
+      UPDATE users
+      SET full_name = $1, email = $2, mobile = $3, role = COALESCE($4, role)
+      WHERE id = $5
+      `,
+      [full_name, email, mobile, role || null, id]
+    );
+
+    if (existingProfile.rowCount === 0) {
+      await client.query(
+        `
+        INSERT INTO dsa_profiles (
+          user_id, agency_name, dsa_code, empanelment_date, pan_number,
+          aadhaar_number, office_address, city, state, pincode,
+          certificate_path, profile_completed
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,true)
+        `,
+        [
+          id, agency_name, dsa_code, empanelment_date,
+          String(pan_number).toUpperCase(), aadhaar_number,
+          office_address, city, state, pincode, certificatePath,
+        ]
+      );
+    } else {
+      await client.query(
+        `
+        UPDATE dsa_profiles
+        SET
+          agency_name = $1, dsa_code = $2, empanelment_date = $3,
+          pan_number = $4, aadhaar_number = $5, office_address = $6,
+          city = $7, state = $8, pincode = $9, certificate_path = $10,
+          profile_completed = true
+        WHERE user_id = $11
+        `,
+        [
+          agency_name, dsa_code, empanelment_date,
+          String(pan_number).toUpperCase(), aadhaar_number,
+          office_address, city, state, pincode, certificatePath, id,
+        ]
+      );
+    }
+
+    await client.query("COMMIT");
+
+    return res.status(200).json({ success: true, message: "DSA updated successfully" });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Update DSA Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to update DSA" });
+  } finally {
+    client.release();
+  }
+};

@@ -96,7 +96,8 @@ export const deleteLoanService = async (req: Request, res: Response) => {
 };
 
 /* ═══════════════════════════════════════════
-   2. DOCUMENT TYPES (linked to a loan service)
+   2. DOCUMENT TYPES (linked to MANY loan services
+      via the document_type_loan_services join table)
 ═══════════════════════════════════════════ */
 export const getDocumentTypes = async (req: Request, res: Response) => {
   try {
@@ -105,18 +106,33 @@ export const getDocumentTypes = async (req: Request, res: Response) => {
     let query = `
       SELECT
         dt.*,
-        ls.name AS loan_service_name
+        COALESCE(
+          ARRAY_AGG(ls.id ORDER BY ls.name) FILTER (WHERE ls.id IS NOT NULL),
+          '{}'
+        ) AS loan_service_ids,
+        COALESCE(
+          ARRAY_AGG(ls.name ORDER BY ls.name) FILTER (WHERE ls.id IS NOT NULL),
+          '{}'
+        ) AS loan_service_names
       FROM document_types dt
-      LEFT JOIN loan_services ls ON dt.loan_service_id = ls.id
+      LEFT JOIN document_type_loan_services dtls ON dtls.document_type_id = dt.id
+      LEFT JOIN loan_services ls ON ls.id = dtls.loan_service_id
     `;
     const params: any[] = [];
 
     if (loan_service_id) {
-      query += ` WHERE dt.loan_service_id = $1`;
       params.push(loan_service_id);
+      query += `
+        WHERE dt.id IN (
+          SELECT document_type_id FROM document_type_loan_services WHERE loan_service_id = $1
+        )
+      `;
     }
 
-    query += ` ORDER BY dt.created_at DESC`;
+    query += `
+      GROUP BY dt.id
+      ORDER BY dt.created_at DESC
+    `;
 
     const result = await pool.query(query, params);
     return res.json({ success: true, data: result.rows });
@@ -129,48 +145,75 @@ export const getDocumentTypes = async (req: Request, res: Response) => {
 export const createDocumentType = async (req: Request, res: Response) => {
   try {
     const {
-      loan_service_id,
+      loan_service_ids,
       document_name,
       is_required,
       max_size_mb,
       allowed_file_types,
     } = req.body;
 
-    if (!loan_service_id || !document_name || !document_name.trim()) {
+    if (!Array.isArray(loan_service_ids) || loan_service_ids.length === 0 || !document_name || !document_name.trim()) {
       return res.status(400).json({
         success: false,
-        message: "Loan service and document name are required",
+        message: "At least one loan service and a document name are required",
       });
     }
 
+    // Block duplicate document names on any of the selected services
     const existing = await pool.query(
-      `SELECT id FROM document_types WHERE loan_service_id = $1 AND LOWER(document_name) = LOWER($2)`,
-      [loan_service_id, document_name.trim()]
+      `SELECT dt.id
+       FROM document_types dt
+       JOIN document_type_loan_services dtls ON dtls.document_type_id = dt.id
+       WHERE dtls.loan_service_id = ANY($1::int[]) AND LOWER(dt.document_name) = LOWER($2)`,
+      [loan_service_ids, document_name.trim()]
     );
     if (existing.rows.length > 0) {
       return res.status(400).json({
         success: false,
-        message: "This document type already exists for the selected loan service",
+        message: "This document type already exists for one of the selected loan services",
       });
     }
 
-    const result = await pool.query(
-      `
-      INSERT INTO document_types
-        (loan_service_id, document_name, is_required, max_size_mb, allowed_file_types)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING *
-      `,
-      [
-        loan_service_id,
-        document_name.trim(),
-        is_required ?? true,
-        max_size_mb ?? 5,
-        JSON.stringify(allowed_file_types && allowed_file_types.length > 0 ? allowed_file_types : ["pdf", "jpg", "jpeg", "png"]),
-      ]
-    );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
 
-    return res.status(201).json({ success: true, message: "Document type created", data: result.rows[0] });
+      const docResult = await client.query(
+        `
+        INSERT INTO document_types
+          (document_name, is_required, max_size_mb, allowed_file_types)
+        VALUES ($1, $2, $3, $4)
+        RETURNING *
+        `,
+        [
+          document_name.trim(),
+          is_required ?? true,
+          max_size_mb ?? 5,
+          JSON.stringify(allowed_file_types && allowed_file_types.length > 0 ? allowed_file_types : ["pdf", "jpg", "jpeg", "png"]),
+        ]
+      );
+
+      const newDoc = docResult.rows[0];
+
+      const valuePlaceholders = loan_service_ids.map((_: number, i: number) => `($1, $${i + 2})`).join(", ");
+      await client.query(
+        `INSERT INTO document_type_loan_services (document_type_id, loan_service_id) VALUES ${valuePlaceholders}`,
+        [newDoc.id, ...loan_service_ids]
+      );
+
+      await client.query("COMMIT");
+
+      return res.status(201).json({
+        success: true,
+        message: "Document type created",
+        data: { ...newDoc, loan_service_ids },
+      });
+    } catch (innerErr) {
+      await client.query("ROLLBACK");
+      throw innerErr;
+    } finally {
+      client.release();
+    }
   } catch (err: any) {
     if (err.code === "23503") {
       return res.status(400).json({ success: false, message: "Invalid loan service selected" });
@@ -184,7 +227,7 @@ export const updateDocumentType = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const {
-      loan_service_id,
+      loan_service_ids,
       document_name,
       is_required,
       is_active,
@@ -192,40 +235,91 @@ export const updateDocumentType = async (req: Request, res: Response) => {
       allowed_file_types,
     } = req.body;
 
-    const result = await pool.query(
-      `
-      UPDATE document_types
-      SET loan_service_id = COALESCE($1, loan_service_id),
-          document_name = COALESCE($2, document_name),
-          is_required = COALESCE($3, is_required),
-          is_active = COALESCE($4, is_active),
-          max_size_mb = COALESCE($5, max_size_mb),
-          allowed_file_types = COALESCE($6, allowed_file_types),
-          updated_at = NOW()
-      WHERE id = $7
-      RETURNING *
-      `,
-      [
-        loan_service_id,
-        document_name,
-        is_required,
-        is_active,
-        max_size_mb,
-        allowed_file_types ? JSON.stringify(allowed_file_types) : null,
-        id,
-      ]
-    );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ success: false, message: "Document type not found" });
+      const result = await client.query(
+        `
+        UPDATE document_types
+        SET document_name = COALESCE($1, document_name),
+            is_required = COALESCE($2, is_required),
+            is_active = COALESCE($3, is_active),
+            max_size_mb = COALESCE($4, max_size_mb),
+            allowed_file_types = COALESCE($5, allowed_file_types),
+            updated_at = NOW()
+        WHERE id = $6
+        RETURNING *
+        `,
+        [
+          document_name,
+          is_required,
+          is_active,
+          max_size_mb,
+          allowed_file_types ? JSON.stringify(allowed_file_types) : null,
+          id,
+        ]
+      );
+
+      if (result.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ success: false, message: "Document type not found" });
+      }
+
+      // Only touch the loan-service links if the caller actually sent an array.
+      // (Lets toggleActive() call this same endpoint with just { is_active } and
+      // not accidentally wipe out the document's linked services.)
+      if (Array.isArray(loan_service_ids)) {
+        if (loan_service_ids.length === 0) {
+          await client.query("ROLLBACK");
+          return res.status(400).json({ success: false, message: "At least one loan service is required" });
+        }
+
+        await client.query(
+          `DELETE FROM document_type_loan_services WHERE document_type_id = $1`,
+          [id]
+        );
+
+        const valuePlaceholders = loan_service_ids.map((_: number, i: number) => `($1, $${i + 2})`).join(", ");
+        await client.query(
+          `INSERT INTO document_type_loan_services (document_type_id, loan_service_id) VALUES ${valuePlaceholders}`,
+          [id, ...loan_service_ids]
+        );
+      }
+
+      await client.query("COMMIT");
+
+      const finalResult = await pool.query(
+        `
+        SELECT
+          dt.*,
+          COALESCE(ARRAY_AGG(ls.id ORDER BY ls.name) FILTER (WHERE ls.id IS NOT NULL), '{}') AS loan_service_ids,
+          COALESCE(ARRAY_AGG(ls.name ORDER BY ls.name) FILTER (WHERE ls.id IS NOT NULL), '{}') AS loan_service_names
+        FROM document_types dt
+        LEFT JOIN document_type_loan_services dtls ON dtls.document_type_id = dt.id
+        LEFT JOIN loan_services ls ON ls.id = dtls.loan_service_id
+        WHERE dt.id = $1
+        GROUP BY dt.id
+        `,
+        [id]
+      );
+
+      return res.json({ success: true, message: "Document type updated", data: finalResult.rows[0] });
+    } catch (innerErr) {
+      await client.query("ROLLBACK");
+      throw innerErr;
+    } finally {
+      client.release();
     }
-
-    return res.json({ success: true, message: "Document type updated", data: result.rows[0] });
-  } catch (err) {
+  } catch (err: any) {
+    if (err.code === "23503") {
+      return res.status(400).json({ success: false, message: "Invalid loan service selected" });
+    }
     console.error("updateDocumentType error:", err);
     return res.status(500).json({ success: false, message: "Server error" });
   }
 };
+
 export const deleteDocumentType = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -429,18 +523,24 @@ export const getLoanTenures = async (req: Request, res: Response) => {
     let query = `
       SELECT
         lt.*,
-        ls.name AS loan_service_name
+        COALESCE(ARRAY_AGG(ls.id ORDER BY ls.name) FILTER (WHERE ls.id IS NOT NULL), '{}') AS loan_service_ids,
+        COALESCE(ARRAY_AGG(ls.name ORDER BY ls.name) FILTER (WHERE ls.id IS NOT NULL), '{}') AS loan_service_names
       FROM loan_tenures lt
-      LEFT JOIN loan_services ls ON lt.loan_service_id = ls.id
+      LEFT JOIN loan_tenure_loan_services ltls ON ltls.loan_tenure_id = lt.id
+      LEFT JOIN loan_services ls ON ls.id = ltls.loan_service_id
     `;
     const params: any[] = [];
 
     if (loan_service_id) {
-      query += ` WHERE lt.loan_service_id = $1`;
       params.push(loan_service_id);
+      query += `
+        WHERE lt.id IN (
+          SELECT loan_tenure_id FROM loan_tenure_loan_services WHERE loan_service_id = $1
+        )
+      `;
     }
 
-    query += ` ORDER BY lt.tenure_months ASC`;
+    query += ` GROUP BY lt.id ORDER BY lt.tenure_months ASC`;
 
     const result = await pool.query(query, params);
     return res.json({ success: true, data: result.rows });
@@ -452,36 +552,58 @@ export const getLoanTenures = async (req: Request, res: Response) => {
 
 export const createLoanTenure = async (req: Request, res: Response) => {
   try {
-    const { loan_service_id, tenure_months, display_name } = req.body;
+    const { loan_service_ids, tenure_months, display_name } = req.body;
 
-    if (!loan_service_id || !tenure_months) {
+    if (!Array.isArray(loan_service_ids) || loan_service_ids.length === 0 || !tenure_months) {
       return res.status(400).json({
         success: false,
-        message: "Loan service and tenure (months) are required",
+        message: "At least one loan service and tenure (months) are required",
       });
     }
 
     const existing = await pool.query(
-      `SELECT id FROM loan_tenures WHERE loan_service_id = $1 AND tenure_months = $2`,
-      [loan_service_id, tenure_months]
+      `SELECT lt.id
+       FROM loan_tenures lt
+       JOIN loan_tenure_loan_services ltls ON ltls.loan_tenure_id = lt.id
+       WHERE ltls.loan_service_id = ANY($1::int[]) AND lt.tenure_months = $2`,
+      [loan_service_ids, tenure_months]
     );
     if (existing.rows.length > 0) {
       return res.status(400).json({
         success: false,
-        message: "This tenure already exists for the selected loan service",
+        message: "This tenure already exists for one of the selected loan services",
       });
     }
 
-    const result = await pool.query(
-      `
-      INSERT INTO loan_tenures (loan_service_id, tenure_months, display_name)
-      VALUES ($1, $2, $3)
-      RETURNING *
-      `,
-      [loan_service_id, tenure_months, display_name || null]
-    );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
 
-    return res.status(201).json({ success: true, message: "Loan tenure created", data: result.rows[0] });
+      const tenureResult = await client.query(
+        `INSERT INTO loan_tenures (tenure_months, display_name) VALUES ($1, $2) RETURNING *`,
+        [tenure_months, display_name || null]
+      );
+      const newTenure = tenureResult.rows[0];
+
+      const valuePlaceholders = loan_service_ids.map((_: number, i: number) => `($1, $${i + 2})`).join(", ");
+      await client.query(
+        `INSERT INTO loan_tenure_loan_services (loan_tenure_id, loan_service_id) VALUES ${valuePlaceholders}`,
+        [newTenure.id, ...loan_service_ids]
+      );
+
+      await client.query("COMMIT");
+
+      return res.status(201).json({
+        success: true,
+        message: "Loan tenure created",
+        data: { ...newTenure, loan_service_ids },
+      });
+    } catch (innerErr) {
+      await client.query("ROLLBACK");
+      throw innerErr;
+    } finally {
+      client.release();
+    }
   } catch (err: any) {
     if (err.code === "23503") {
       return res.status(400).json({ success: false, message: "Invalid loan service selected" });
@@ -494,33 +616,77 @@ export const createLoanTenure = async (req: Request, res: Response) => {
 export const updateLoanTenure = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { loan_service_id, tenure_months, display_name, is_active } = req.body;
+    const { loan_service_ids, tenure_months, display_name, is_active } = req.body;
 
-    const result = await pool.query(
-      `
-      UPDATE loan_tenures
-      SET loan_service_id = COALESCE($1, loan_service_id),
-          tenure_months = COALESCE($2, tenure_months),
-          display_name = COALESCE($3, display_name),
-          is_active = COALESCE($4, is_active),
-          updated_at = NOW()
-      WHERE id = $5
-      RETURNING *
-      `,
-      [loan_service_id, tenure_months, display_name, is_active, id]
-    );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ success: false, message: "Loan tenure not found" });
+      const result = await client.query(
+        `
+        UPDATE loan_tenures
+        SET tenure_months = COALESCE($1, tenure_months),
+            display_name = COALESCE($2, display_name),
+            is_active = COALESCE($3, is_active),
+            updated_at = NOW()
+        WHERE id = $4
+        RETURNING *
+        `,
+        [tenure_months, display_name, is_active, id]
+      );
+
+      if (result.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ success: false, message: "Loan tenure not found" });
+      }
+
+      if (Array.isArray(loan_service_ids)) {
+        if (loan_service_ids.length === 0) {
+          await client.query("ROLLBACK");
+          return res.status(400).json({ success: false, message: "At least one loan service is required" });
+        }
+
+        await client.query(`DELETE FROM loan_tenure_loan_services WHERE loan_tenure_id = $1`, [id]);
+
+        const valuePlaceholders = loan_service_ids.map((_: number, i: number) => `($1, $${i + 2})`).join(", ");
+        await client.query(
+          `INSERT INTO loan_tenure_loan_services (loan_tenure_id, loan_service_id) VALUES ${valuePlaceholders}`,
+          [id, ...loan_service_ids]
+        );
+      }
+
+      await client.query("COMMIT");
+
+      const finalResult = await pool.query(
+        `
+        SELECT
+          lt.*,
+          COALESCE(ARRAY_AGG(ls.id ORDER BY ls.name) FILTER (WHERE ls.id IS NOT NULL), '{}') AS loan_service_ids,
+          COALESCE(ARRAY_AGG(ls.name ORDER BY ls.name) FILTER (WHERE ls.id IS NOT NULL), '{}') AS loan_service_names
+        FROM loan_tenures lt
+        LEFT JOIN loan_tenure_loan_services ltls ON ltls.loan_tenure_id = lt.id
+        LEFT JOIN loan_services ls ON ls.id = ltls.loan_service_id
+        WHERE lt.id = $1
+        GROUP BY lt.id
+        `,
+        [id]
+      );
+
+      return res.json({ success: true, message: "Loan tenure updated", data: finalResult.rows[0] });
+    } catch (innerErr) {
+      await client.query("ROLLBACK");
+      throw innerErr;
+    } finally {
+      client.release();
     }
-
-    return res.json({ success: true, message: "Loan tenure updated", data: result.rows[0] });
-  } catch (err) {
+  } catch (err: any) {
+    if (err.code === "23503") {
+      return res.status(400).json({ success: false, message: "Invalid loan service selected" });
+    }
     console.error("updateLoanTenure error:", err);
     return res.status(500).json({ success: false, message: "Server error" });
   }
 };
-
 export const deleteLoanTenure = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;

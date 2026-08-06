@@ -45,10 +45,11 @@ export const getPublicLoanTenures = async (req: Request, res: Response) => {
     }
     const result = await pool.query(
       `
-      SELECT id, tenure_months, display_name
-      FROM loan_tenures
-      WHERE loan_service_id = $1 AND is_active = true
-      ORDER BY tenure_months ASC
+      SELECT lt.id, lt.tenure_months, lt.display_name
+      FROM loan_tenures lt
+      JOIN loan_tenure_loan_services ltls ON ltls.loan_tenure_id = lt.id
+      WHERE ltls.loan_service_id = $1 AND lt.is_active = true
+      ORDER BY lt.tenure_months ASC
       `,
       [loan_service_id]
     );
@@ -58,7 +59,6 @@ export const getPublicLoanTenures = async (req: Request, res: Response) => {
     return res.status(500).json({ success: false, message: "Server error" });
   }
 };
-
 export const getPublicDocumentTypes = async (req: Request, res: Response) => {
   try {
     const { loan_service_id } = req.query;
@@ -67,10 +67,11 @@ export const getPublicDocumentTypes = async (req: Request, res: Response) => {
     }
     const result = await pool.query(
       `
-      SELECT id, document_name, is_required, max_size_mb, allowed_file_types
-      FROM document_types
-      WHERE loan_service_id = $1 AND is_active = true
-      ORDER BY id ASC
+      SELECT dt.id, dt.document_name, dt.is_required, dt.max_size_mb, dt.allowed_file_types
+      FROM document_types dt
+      JOIN document_type_loan_services dtls ON dtls.document_type_id = dt.id
+      WHERE dtls.loan_service_id = $1 AND dt.is_active = true
+      ORDER BY dt.id ASC
       `,
       [loan_service_id]
     );
@@ -78,5 +79,28 @@ export const getPublicDocumentTypes = async (req: Request, res: Response) => {
   } catch (err) {
     console.error("getPublicDocumentTypes error:", err);
     return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+export const getPublicRoles = async (req: Request, res: Response) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, role_name
+      FROM roles
+      WHERE is_active = true
+      ORDER BY role_name
+    `);
+
+    return res.json({
+      success: true,
+      data: result.rows,
+    });
+
+  } catch (err) {
+    console.error(err);
+
+    return res.status(500).json({
+      success:false,
+      message:"Server Error"
+    });
   }
 };

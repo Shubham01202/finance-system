@@ -5,21 +5,28 @@ import {
   getApplicationById,
   updateApplicationStatus,
   sendApplicationToBanker,
+
   getAllUsers,
   getUserById,
   updateUser,
   toggleUserStatus,
+  deleteUser,
+  createUser,
+  resetUserPassword,
+
   getBanks,
   addBank,
   updateBank,
   deleteBank,
-  deleteUser,
+
   getAdminProfile,
   updateAdminProfile,
+
   getCAById,
   updateCA,
-  resetUserPassword,
-  createUser,
+
+  getDSAById,
+  updateDSA,
 } from "../controllers/admin.controller";
 
 import { adminAuth } from "../middleware/adminAuth.middleware";
@@ -29,32 +36,18 @@ const router = express.Router();
 /* =========================
    DASHBOARD
 ========================= */
-router.get(
-  "/dashboard",
-  adminAuth,
-  getDashboardStats
-);
+
+router.get("/dashboard", adminAuth, getDashboardStats);
 
 /* =========================
    APPLICATIONS
 ========================= */
-router.get(
-  "/applications",
-  adminAuth,
-  getAllApplications
-);
 
-router.get(
-  "/applications/:id",
-  adminAuth,
-  getApplicationById
-);
+router.get("/applications", adminAuth, getAllApplications);
 
-router.put(
-  "/applications/:id",
-  adminAuth,
-  updateApplicationStatus
-);
+router.get("/applications/:id", adminAuth, getApplicationById);
+
+router.put("/applications/:id", adminAuth, updateApplicationStatus);
 
 router.post(
   "/applications/:id/send-to-banker",
@@ -62,91 +55,62 @@ router.post(
   sendApplicationToBanker
 );
 
+/* =========================
+   USERS
+========================= */
+
+router.get("/users", adminAuth, getAllUsers);
+
+router.post("/users", adminAuth, createUser);
+
+router.get("/users/:id", adminAuth, getUserById);
+
+router.put("/users/:id", adminAuth, updateUser);
+
 router.put(
   "/users/:id/reset-password",
   adminAuth,
   resetUserPassword
 );
 
-/* =========================
-   USERS
-========================= */
-router.get(
-  "/users",
-  adminAuth,
-  getAllUsers
-);
+router.put("/users/:id/toggle", adminAuth, toggleUserStatus);
 
-router.get(
-  "/users/:id",
-  adminAuth,
-  getUserById
-);
-
-router.put(
-  "/users/:id",
-  adminAuth,
-  updateUser
-);
-router.post(
-  "/users",
-  adminAuth,
-  createUser
-);
-
-router.put(
-  "/users/:id/toggle",
-  adminAuth,
-  toggleUserStatus
-);
-
-router.delete(
-  "/users/:id",
-  adminAuth,
-  deleteUser
-);
+router.delete("/users/:id", adminAuth, deleteUser);
 
 /* =========================
    BANKS
 ========================= */
-router.get(
-  "/banks",
-  adminAuth,
-  getBanks
-);
 
-router.post(
-  "/banks",
-  adminAuth,
-  addBank
-);
+router.get("/banks", adminAuth, getBanks);
 
-router.put(
-  "/banks/:id",
-  adminAuth,
-  updateBank
-);
+router.post("/banks", adminAuth, addBank);
 
-router.delete(
-  "/banks/:id",
-  adminAuth,
-  deleteBank
-);
+router.put("/banks/:id", adminAuth, updateBank);
+
+router.delete("/banks/:id", adminAuth, deleteBank);
+
+/* =========================
+   DSA
+========================= */
+
+router.get("/dsa/:id", adminAuth, getDSAById);
+
+router.put("/dsa/:id", adminAuth, updateDSA);
+
+/* =========================
+   CA
+========================= */
+
+router.get("/ca/:id", adminAuth, getCAById);
+
+router.put("/ca/:id", adminAuth, updateCA);
 
 /* =========================
    ADMIN PROFILE
 ========================= */
-router.get(
-  "/profile",
-  adminAuth,
-  getAdminProfile
-);
-router.get("/ca/:id", adminAuth, getCAById);
-router.put("/ca/:id", adminAuth, updateCA);
-router.put(
-  "/profile",
-  adminAuth,
-  updateAdminProfile
-);
+
+router.get("/profile", adminAuth, getAdminProfile);
+
+router.put("/profile", adminAuth, updateAdminProfile);
 
 export default router;

@@ -1,73 +1,27 @@
-
-
 // Path: backend/src/services/email.service.ts
 
+import nodemailer from "nodemailer";
+
 /* ─────────────────────────────────────────────
-   BREVO HTTP API SENDER
-   Sends over HTTPS (port 443) instead of raw SMTP sockets —
-   avoids Render's outbound SMTP port blocking entirely.
+   TRANSPORTER
 ───────────────────────────────────────────── */
-interface BrevoAttachment {
-  filename: string;
-  content?: Buffer;
-  path?: string; // absolute path on disk, will be read + base64-encoded
-}
+const transporter = nodemailer.createTransport({
+  host:   process.env.SMTP_HOST,
+  port:   Number(process.env.SMTP_PORT),
+  secure: false, // TLS on port 587
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+});
 
-interface BrevoEmailPayload {
-  to: string;
-  subject: string;
-  html: string;
-  attachments?: BrevoAttachment[];
-}
-
-function parseSenderEmail(raw: string | undefined): string {
-  if (!raw) return "";
-  const match = raw.match(/<([^>]+)>/);
-  return (match ? match[1] : raw).trim();
-}
-
-async function sendViaBrevo({ to, subject, html, attachments }: BrevoEmailPayload): Promise<void> {
-  const senderEmail = parseSenderEmail(process.env.SMTP_FROM);
-
-  // Brevo's API wants attachments as base64 strings, not file paths/buffers directly.
-  let brevoAttachments: { name: string; content: string }[] | undefined;
-
-  if (attachments && attachments.length > 0) {
-    const fs = await import("fs");
-    brevoAttachments = attachments.map((att) => {
-      const buffer = att.content ?? (att.path ? fs.readFileSync(att.path) : Buffer.from(""));
-      return {
-        name: att.filename,
-        content: buffer.toString("base64"),
-      };
-    });
+transporter.verify((error, success) => {
+  if (error) {
+    console.log("SMTP ERROR:", error);
+  } else {
+    console.log("SMTP SERVER READY");
   }
-
-  const response = await fetch("https://api.brevo.com/v3/smtp/email", {
-    method: "POST",
-    headers: {
-      "api-key": process.env.BREVO_API_KEY as string,
-      "Content-Type": "application/json",
-      "Accept": "application/json",
-    },
-    body: JSON.stringify({
-      sender: {
-        email: senderEmail,
-        name: "SN Finance Service",
-      },
-      to: [{ email: to }],
-      subject,
-      htmlContent: html,
-      ...(brevoAttachments ? { attachment: brevoAttachments } : {}),
-    }),
-  });
-
-  if (!response.ok) {
-    const errorBody = await response.json().catch(() => ({}));
-    console.error("Brevo API error:", errorBody);
-    throw new Error(`Brevo API error: ${JSON.stringify(errorBody)}`);
-  }
-}
+});
 
 /* ─────────────────────────────────────────────
    OTP EMAIL TEMPLATE
@@ -77,7 +31,10 @@ async function sendViaBrevo({ to, subject, html, attachments }: BrevoEmailPayloa
    or just click straight through.
 ───────────────────────────────────────────── */
 function otpEmailTemplate(fullName: string, otp: string, role: string, resetLink?: string): string {
-  const roleLabel = role === "ca" ? "Chartered Accountant" : "Customer";
+  const roleLabel =
+    role === "ca" ? "Chartered Accountant" :
+    role === "dsa" ? "Direct Selling Agent" :
+    "Customer";
   const isReset = Boolean(resetLink);
 
   const heading = isReset ? "Reset Your Password 🔑" : "Verify Your Email 📧";
@@ -188,10 +145,17 @@ function otpEmailTemplate(fullName: string, otp: string, role: string, resetLink
    WELCOME / CONFIRMATION EMAIL TEMPLATE
 ───────────────────────────────────────────── */
 function welcomeEmailTemplate(fullName: string, role: string): string {
-  const roleLabel = role === "ca" ? "Chartered Accountant" : "Customer";
-  const roleMsg   = role === "ca"
-    ? "You can now assist clients with their loan applications on our platform."
-    : "You can now apply for personal, home, business, and other loans easily.";
+  const roleLabel =
+    role === "ca" ? "Chartered Accountant" :
+    role === "dsa" ? "Direct Selling Agent" :
+    "Customer";
+
+  const roleMsg =
+    role === "ca"
+      ? "You can now assist clients with their loan applications on our platform."
+      : role === "dsa"
+      ? "You can now submit and manage loan applications on behalf of your customers."
+      : "You can now apply for personal, home, business, and other loans easily.";
 
   return `
 <!DOCTYPE html>
@@ -380,12 +344,13 @@ export async function sendOtpEmail(
   resetLink?: string
 ): Promise<void> {
   const isReset = Boolean(resetLink);
-  await sendViaBrevo({
-    to: toEmail,
+  await transporter.sendMail({
+    from:    process.env.SMTP_FROM,
+    to:      toEmail,
     subject: isReset
       ? "Reset your SN Finance Service password"
       : `${otp} is your SN Finance Service verification code`,
-    html: otpEmailTemplate(fullName, otp, role, resetLink),
+    html:    otpEmailTemplate(fullName, otp, role, resetLink),
   });
 }
 
@@ -394,7 +359,8 @@ export async function sendSetupPasswordEmail(
   fullName: string,
   setupLink: string
 ): Promise<void> {
-  await sendViaBrevo({
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM,
     to: toEmail,
     subject: "Set Your Password - SN Finance Service",
     html: setupPasswordTemplate(
@@ -412,10 +378,11 @@ export async function sendWelcomeEmail(
   fullName: string,
   role: string
 ): Promise<void> {
-  await sendViaBrevo({
-    to: toEmail,
+  await transporter.sendMail({
+    from:    process.env.SMTP_FROM,
+    to:      toEmail,
     subject: `Welcome to SN Finance Service, ${fullName}! 🎉`,
-    html: welcomeEmailTemplate(fullName, role),
+    html:    welcomeEmailTemplate(fullName, role),
   });
 }
 
@@ -622,7 +589,8 @@ export async function sendApplicationToBankerEmail(
   documentNames: string[],
   attachments: { filename: string; content?: Buffer; path?: string }[]
 ): Promise<void> {
-  await sendViaBrevo({
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM,
     to: toEmail,
     subject,
     html: applicationToBankerTemplate(application, documentNames),
