@@ -5,6 +5,12 @@ import { useRouter, useParams } from "next/navigation";
 import { FaArrowLeft, FaSave, FaKey, FaEye, FaEyeSlash, FaTimes } from "react-icons/fa";
 import AdminLayout from "../../../../../components/layout/admin/AdminLayout";
 
+interface Role {
+  id: number;
+  role_name: string;
+  is_active: boolean;
+}
+
 export default function EditUserPage() {
   const router = useRouter();
   const params = useParams();
@@ -13,9 +19,15 @@ export default function EditUserPage() {
 
   const token = () => localStorage.getItem("token");
 
-  const [loading, setLoading] = useState(true);
+const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [adminName, setAdminName] = useState("Admin");
+
+  const [roles, setRoles] = useState<Role[]>([
+    { id: -1, role_name: "customer", is_active: true },
+    { id: -2, role_name: "ca", is_active: true },
+    { id: -3, role_name: "admin", is_active: true },
+  ]);
 
   const [form, setForm] = useState({
     full_name: "",
@@ -32,6 +44,33 @@ export default function EditUserPage() {
   const [resetError, setResetError] = useState("");
   const [resetSuccess, setResetSuccess] = useState("");
 
+ const DEFAULT_ROLES: Role[] = [
+    { id: -1, role_name: "customer", is_active: true },
+    { id: -2, role_name: "ca", is_active: true },
+    { id: -3, role_name: "admin", is_active: true },
+  ];
+
+  const fetchRoles = async () => {
+    try {
+      const res = await fetch(`${API}/api/auth/roles`, {
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      const data = await res.json();
+      if (data.success) {
+        const fetched: Role[] = data.data.filter((r: Role) => r.is_active);
+        const merged = [
+          ...DEFAULT_ROLES,
+          ...fetched.filter(
+            (fr) => !DEFAULT_ROLES.some((dr) => dr.role_name.toLowerCase() === fr.role_name.toLowerCase())
+          ),
+        ];
+        setRoles(merged);
+      }
+    } catch {
+      // keep the defaults already in state if this fails
+    }
+  };
+
   useEffect(() => {
     const t = token();
     if (!t) { router.push("/"); return; }
@@ -41,6 +80,7 @@ export default function EditUserPage() {
       setAdminName(user.full_name || "Admin");
     } catch {}
     fetchUser();
+    fetchRoles();
   }, []);
 
   const fetchUser = async () => {
@@ -192,15 +232,17 @@ export default function EditUserPage() {
               />
             </Field>
 
-            <Field label="Role">
+           <Field label="Role">
               <select
                 value={form.role}
                 onChange={(e) => setForm({ ...form, role: e.target.value })}
-                className="w-full px-3.5 py-2.5 rounded-[10px] border border-slate-200 bg-white text-slate-900 text-sm outline-none cursor-pointer box-border"
+                className="w-full px-3.5 py-2.5 rounded-[10px] border border-slate-200 bg-white text-slate-900 text-sm outline-none cursor-pointer box-border capitalize"
               >
-                <option value="customer">Customer</option>
-                <option value="ca">CA</option>
-                <option value="admin">Admin</option>
+                {roles.map((r) => (
+                  <option key={r.id} value={r.role_name} className="capitalize">
+                    {r.role_name}
+                  </option>
+                ))}
               </select>
             </Field>
 

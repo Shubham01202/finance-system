@@ -17,6 +17,12 @@ interface User {
   is_active: boolean;
 }
 
+interface Role {
+  id: number;
+  role_name: string;
+  is_active: boolean;
+}
+
 /* ─── Confirm Dialog ─────────────────────────────────────── */
 function ConfirmDialog({
   message, onConfirm, onClose,
@@ -64,6 +70,7 @@ function RoleBadge({ role }: { role: string }) {
     admin: "bg-violet-500/10 text-violet-600 border-violet-500/30",
     user: "bg-blue-500/10 text-blue-600 border-blue-500/30",
     ca: "bg-amber-500/10 text-amber-700 border-amber-500/30",
+    dsa: "bg-teal-500/10 text-teal-700 border-teal-500/30",
     customer: "bg-blue-500/10 text-blue-600 border-blue-500/30",
   };
   const classes = map[(role ?? "user").toLowerCase()] ?? map["user"];
@@ -98,6 +105,11 @@ export default function AdminUsersPage() {
   const router = useRouter();
 
   const [users, setUsers] = useState<User[]>([]);
+  const [roles, setRoles] = useState<Role[]>([
+    { id: -1, role_name: "customer", is_active: true },
+    { id: -2, role_name: "ca", is_active: true },
+    { id: -3, role_name: "admin", is_active: true },
+  ]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -154,8 +166,43 @@ export default function AdminUsersPage() {
     }
   };
 
+  // These always stay in the dropdown, even if the roles API doesn't
+  // return them (e.g. if "ca" was never added as a row in the roles table).
+  const DEFAULT_ROLES: Role[] = [
+    { id: -1, role_name: "customer", is_active: true },
+    { id: -2, role_name: "ca", is_active: true },
+    { id: -3, role_name: "admin", is_active: true },
+  ];
+
+  const fetchRoles = async () => {
+    try {
+      const res = await fetch(`${API}/api/auth/roles`, {
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      const data = await res.json();
+      if (data.success) {
+        const fetched: Role[] = data.data.filter((r: Role) => r.is_active);
+        // Merge: keep every default role, and add any fetched role
+        // (like "dsa") that isn't already in the defaults.
+        const merged = [
+          ...DEFAULT_ROLES,
+          ...fetched.filter(
+            (fr) => !DEFAULT_ROLES.some((dr) => dr.role_name.toLowerCase() === fr.role_name.toLowerCase())
+          ),
+        ];
+        setRoles(merged);
+      } else {
+        setRoles(DEFAULT_ROLES);
+      }
+    } catch {
+      // if the API call fails entirely, still show the defaults
+      setRoles(DEFAULT_ROLES);
+    }
+  };
+
   useEffect(() => {
     fetchUsers();
+    fetchRoles();
     try {
       const user = JSON.parse(localStorage.getItem("user") || "{}");
       if (user.full_name) setAdminName(user.full_name);
@@ -191,6 +238,10 @@ export default function AdminUsersPage() {
   };
 
   const handleCreateUser = async () => {
+     if (!/^[6-9]\d{9}$/.test(newUser.mobile)) {
+    alert("Enter a valid 10-digit mobile number.");
+    return;
+  }
     try {
       const res = await fetch(`${API}/api/admin/users`, {
         method: "POST",
@@ -219,7 +270,11 @@ export default function AdminUsersPage() {
 
   const activeCount = users.filter((u) => u.is_active).length;
   const inactiveCount = users.length - activeCount;
-  const roles = ["all", ...Array.from(new Set(users.map((u) => (u.role ?? "user").toLowerCase())))];
+
+  // Distinct roles actually present among users, for the filter dropdown.
+  // Renamed from `roles` to `roleFilterOptions` to avoid clashing with the
+  // `roles` state (Role[]) fetched from /api/auth/roles above.
+  const roleFilterOptions = ["all", ...Array.from(new Set(users.map((u) => (u.role ?? "user").toLowerCase())))];
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / itemsPerPage));
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -236,13 +291,20 @@ export default function AdminUsersPage() {
   /* Single source of truth for Edit routing — CA users go to the
      CA-specific admin edit page, everyone else to the generic one.
      Used by BOTH the desktop table and the mobile card below. */
-  const handleEdit = (user: User) => {
-    if (user.role === "ca") {
+ const handleEdit = (user: User) => {
+  switch (user.role) {
+    case "ca":
       router.push(`/admin/ca/${user.id}/edit`);
-    } else {
+      break;
+
+    case "dsa":
+      router.push(`/admin/dsa/${user.id}/edit`);
+      break;
+
+    default:
       router.push(`/admin/users/${user.id}/edit`);
-    }
-  };
+  }
+};
 
   return (
     <AdminLayout adminName={adminName} handleLogout={handleLogout}>
@@ -251,7 +313,7 @@ export default function AdminUsersPage() {
       <div className="flex flex-wrap justify-between items-center gap-3.5 mb-6">
         <div>
           <h1 className="text-xl sm:text-2xl font-extrabold text-slate-800 m-0">Users Management</h1>
-          <p className="text-[13px] text-slate-400 mt-1">Manage customer, CA, and admin accounts</p>
+          <p className="text-[13px] text-slate-400 mt-1">Manage Users accounts</p>
         </div>
         <button
           onClick={() => setShowCreateModal(true)}
@@ -298,7 +360,7 @@ export default function AdminUsersPage() {
           onChange={(e) => setRoleFilter(e.target.value)}
           className="px-3.5 py-2.5 rounded-[10px] border border-slate-200 bg-white text-slate-900 text-sm outline-none cursor-pointer capitalize"
         >
-          {roles.map((r) => (
+          {roleFilterOptions.map((r) => (
             <option key={r} value={r}>
               {r === "all" ? "All Roles" : r.charAt(0).toUpperCase() + r.slice(1)}
             </option>
@@ -481,20 +543,38 @@ export default function AdminUsersPage() {
                 onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
                 className="w-full px-3.5 py-2.5 rounded-[10px] border border-slate-200 bg-slate-50 text-slate-900 text-sm outline-none box-border"
               />
-              <input
-                placeholder="Mobile"
-                value={newUser.mobile}
-                onChange={(e) => setNewUser({ ...newUser, mobile: e.target.value })}
-                className="w-full px-3.5 py-2.5 rounded-[10px] border border-slate-200 bg-slate-50 text-slate-900 text-sm outline-none box-border"
-              />
+            <input
+  placeholder="Mobile"
+  value={newUser.mobile}
+  onChange={(e) => {
+    let value = e.target.value.replace(/\D/g, ""); // only numbers
+
+    if (value.length > 10) {
+      value = value.slice(0, 10); // max 10 digits
+    }
+
+    // first digit must be 6-9
+    if (value.length > 0 && !/^[6-9]/.test(value)) {
+      value = "";
+    }
+
+    setNewUser({
+      ...newUser,
+      mobile: value,
+    });
+  }}
+  className="w-full px-3.5 py-2.5 rounded-[10px] border border-slate-200 bg-slate-50 text-slate-900 text-sm outline-none box-border"
+/>
               <select
                 value={newUser.role}
                 onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
-                className="w-full px-3.5 py-2.5 rounded-[10px] border border-slate-200 bg-white text-slate-900 text-sm outline-none cursor-pointer"
+                className="w-full px-3.5 py-2.5 rounded-[10px] border border-slate-200 bg-white text-slate-900 text-sm outline-none cursor-pointer capitalize"
               >
-                <option value="customer">Customer</option>
-                <option value="ca">CA</option>
-                <option value="admin">Admin</option>
+                {roles.map((r) => (
+                  <option key={r.id} value={r.role_name} className="capitalize">
+                    {r.role_name}
+                  </option>
+                ))}
               </select>
               <select
                 value={newUser.setupMethod}

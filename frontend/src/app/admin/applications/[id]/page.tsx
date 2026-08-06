@@ -3,14 +3,9 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
-  FaShieldAlt,
-  FaChartLine,
   FaFileAlt,
   FaUsers,
   FaUniversity,
-  FaUserCog,
-  FaSignOutAlt,
-  FaArrowLeft,
   FaCheckCircle,
   FaTimesCircle,
   FaClock,
@@ -28,7 +23,9 @@ import {
   FaEye,
   FaTimes,
   FaPaperPlane,
+  FaArrowLeft,
 } from "react-icons/fa";
+import AdminLayout from "../../../../components/layout/admin/AdminLayout";
 
 /* ───────────────── TYPES ───────────────── */
 interface Remark {
@@ -46,6 +43,19 @@ interface ApplicationDetail {
   loan_amount?: number;
   bank_name?: string;
   created_at?: string;
+
+  // CA
+  ca_name?: string;
+  ca_email?: string;
+  ca_firm?: string;
+
+  // DSA
+  dsa_name?: string;
+  dsa_email?: string;
+  agency_name?: string;
+
+  applied_by?: string;
+
   [key: string]: any;
 }
 
@@ -54,14 +64,11 @@ const palette = {
   bg: "#F1F5F9",
   surface: "#FFFFFF",
   border: "#E2E8F0",
-  sidebarTop: "#1E293B",
-  sidebarBottom: "#0F172A",
   text900: "#0F172A",
   text500: "#64748B",
   text400: "#94A3B8",
   primary: "#2563EB",
   primaryLight: "#3B82F6",
-  adminAccent: "#F87171",
   success: "#16A34A",
   successBg: "rgba(34,197,94,0.12)",
   warning: "#B45309",
@@ -77,46 +84,6 @@ const statusMap: Record<string, { bg: string; color: string; icon: React.ReactNo
 };
 
 const API = process.env.NEXT_PUBLIC_API_URL;
-
-/* ───────────────── NAV LINK ───────────────── */
-function NavLink({
-  icon,
-  label,
-  active,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  active?: boolean;
-  onClick?: () => void;
-}) {
-  return (
-    <button
-      className="adm-navlink"
-      onClick={onClick}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 11,
-        width: "100%",
-        padding: "10px 13px",
-        borderRadius: 10,
-        border: "none",
-        borderLeft: active ? `3px solid ${palette.primaryLight}` : "3px solid transparent",
-        background: active ? "rgba(59,130,246,0.14)" : "transparent",
-        color: active ? "#fff" : "#94a3b8",
-        fontWeight: active ? 600 : 500,
-        fontSize: 14,
-        cursor: "pointer",
-        textAlign: "left",
-        marginBottom: 2,
-      }}
-    >
-      <span style={{ display: "flex", fontSize: 15 }}>{icon}</span>
-      <span className="adm-label">{label}</span>
-    </button>
-  );
-}
 
 /* ───────────────── STATUS BADGE ───────────────── */
 function StatusBadge({ status, size = "md" }: { status?: string; size?: "sm" | "md" }) {
@@ -172,70 +139,6 @@ function Banner({ type, message }: { type: "success" | "error"; message: string 
 
 /* ───────────────── STYLES ───────────────── */
 const s: Record<string, React.CSSProperties> = {
-  root: {
-    display: "flex",
-    minHeight: "100vh",
-    background: palette.bg,
-    fontFamily: "'Inter', system-ui, sans-serif",
-    color: palette.text900,
-  },
-
-  logo: { display: "flex", alignItems: "center", gap: 10, marginBottom: 6 },
-  logoIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 9,
-    background: `linear-gradient(135deg, ${palette.primaryLight}, ${palette.primary})`,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-  },
-  logoText: {
-    color: "#fff",
-    fontWeight: 700,
-    fontSize: 16,
-    fontFamily: "'Outfit', 'Inter', sans-serif",
-    letterSpacing: "-0.2px",
-  },
-  adminBadge: {
-    padding: "9px 12px",
-    borderRadius: 10,
-    background: "rgba(248,113,113,0.12)",
-    color: palette.adminAccent,
-    fontSize: 12,
-    fontWeight: 700,
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    letterSpacing: "0.02em",
-  },
-  nav: { display: "flex", flexDirection: "column" as const, flex: 1, marginTop: 8 },
-  sidebarUser: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    background: "rgba(255,255,255,0.05)",
-    padding: 10,
-    borderRadius: 12,
-    marginBottom: 10,
-  },
-  avatarCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: "50%",
-    background: `linear-gradient(135deg, ${palette.primaryLight}, #8b5cf6)`,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    color: "#fff",
-    fontWeight: 700,
-    fontSize: 14,
-    flexShrink: 0,
-  },
-
-  main: { flex: 1, minWidth: 0, padding: "28px 36px", overflowY: "auto" as const },
-
   card: {
     background: palette.surface,
     borderRadius: 16,
@@ -502,10 +405,8 @@ export default function AdminApplicationDetailPage() {
   const [adminName, setAdminName] = useState("Admin");
   const [banner, setBanner] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
-  // NEW: which document is currently open in the preview modal (images only — PDFs open in a new tab)
   const [previewDoc, setPreviewDoc] = useState<{ url: string; name: string } | null>(null);
 
-  // NEW: send-to-banker modal state
   const [showBankerModal, setShowBankerModal] = useState(false);
   const [bankerEmail, setBankerEmail] = useState("");
   const [bankerSubject, setBankerSubject] = useState("");
@@ -579,7 +480,7 @@ export default function AdminApplicationDetailPage() {
         showBanner("error", data?.message || "Failed to update application.");
         return;
       }
-showBanner("success", `Application ${status} successfully.`);
+      showBanner("success", `Application ${status} successfully.`);
       setRemark("");
       fetchApplication();
     } catch (err: any) {
@@ -590,8 +491,7 @@ showBanner("success", `Application ${status} successfully.`);
     }
   };
 
-  /* ── NEW: send-to-banker modal helpers ── */
-const openBankerModal = () => {
+  const openBankerModal = () => {
     setBankerEmail("");
     setBankerSubject(`Loan Application Details - ${application?.application_number || application?.id || ""}`);
     setConfirmSend(false);
@@ -610,7 +510,6 @@ const openBankerModal = () => {
       return;
     }
 
-    // first click just asks for confirmation
     if (!confirmSend) {
       setConfirmSend(true);
       return;
@@ -646,9 +545,6 @@ const openBankerModal = () => {
     }
   };
 
-  /* ── NEW: formatting + document preview helpers ── */
-
-  /* ── NEW: formatting + document preview helpers ── */
   const fmt = (n?: number) => (n != null ? "₹" + Number(n).toLocaleString("en-IN") : "—");
 
   const fmtDate = (d?: string) =>
@@ -663,8 +559,6 @@ const openBankerModal = () => {
   const buildDocUrl = (filePath?: string) => {
     if (!filePath) return "";
     const clean = filePath.replace(/^\/+/, "");
-    // NOTE: adjust this if your backend serves uploads from a different base path,
-    // e.g. `${API}/uploads/${clean}`
     return `${API}/${clean}`;
   };
 
@@ -679,89 +573,14 @@ const openBankerModal = () => {
     }
   };
 
-  const sidebarMarkup = (
-    <aside className="adm-sidebar">
-      <div style={s.logo}>
-        <div style={s.logoIcon}>
-          <FaShieldAlt color="#fff" size={15} />
-        </div>
-        <span className="adm-logo-text" style={s.logoText}>SN Finance</span>
-      </div>
-
-      <div style={s.adminBadge}>
-        <FaShieldAlt />
-        <span className="adm-badge-text">Admin Panel</span>
-      </div>
-
-      <nav style={s.nav}>
-        <NavLink icon={<FaChartLine />} label="Dashboard" onClick={() => router.push("/admin/dashboard")} />
-        <NavLink icon={<FaFileAlt />} label="Applications" active onClick={() => router.push("/admin/applications")} />
-        <NavLink icon={<FaUsers />} label="Users" onClick={() => router.push("/admin/users")} />
-        <NavLink icon={<FaUniversity />} label="Banks" onClick={() => router.push("/admin/banks")} />
-        <NavLink icon={<FaUserCog />} label="My Profile" onClick={() => router.push("/admin/profile")} />
-      </nav>
-
-      <div style={s.sidebarUser}>
-        <div style={s.avatarCircle}>{adminName.charAt(0).toUpperCase()}</div>
-        <div className="adm-user-meta">
-          <div style={{ color: "#fff", fontWeight: 600, fontSize: 13.5 }}>{adminName}</div>
-          <div style={{ color: "#94a3b8", fontSize: 12 }}>Administrator</div>
-        </div>
-      </div>
-
-      <button className="adm-logout-btn" onClick={handleLogout}>
-        <FaSignOutAlt />
-        <span className="adm-label">Logout</span>
-      </button>
-    </aside>
-  );
-
   const globalStyles = (
     <style>{`
       @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap');
 
-      .adm-sidebar {
-        width: 232px;
-        min-height: 100vh;
-        height: 100vh;
-        background: linear-gradient(180deg, ${palette.sidebarTop} 0%, ${palette.sidebarBottom} 100%);
-        padding: 22px 16px;
-        display: flex;
-        flex-direction: column;
-        gap: 14px;
-        position: sticky;
-        top: 0;
-        flex-shrink: 0;
-      }
-      .adm-logout-btn {
-        padding: 11px;
-        border-radius: 10px;
-        border: 1px solid rgba(239,68,68,0.3);
-        background: rgba(239,68,68,0.08);
-        color: #f87171;
-        cursor: pointer;
-        font-weight: 600;
-        font-size: 14px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        transition: background .15s ease;
-      }
-      .adm-logout-btn:hover { background: rgba(239,68,68,0.16); }
-
       @media (max-width: 900px) {
-        .adm-sidebar { width: 76px; padding: 18px 8px; }
-        .adm-sidebar .adm-label,
-        .adm-sidebar .adm-logo-text,
-        .adm-sidebar .adm-user-meta,
-        .adm-sidebar .adm-badge-text { display: none; }
-        .adm-main { padding: 22px 16px !important; }
         .adm-field-grid { grid-template-columns: 1fr !important; }
       }
 
-      .adm-navlink:hover { background: rgba(255,255,255,0.08) !important; color: #fff !important; }
-      .adm-navlink:focus-visible,
       .adm-back-btn:focus-visible,
       .adm-approve-btn:focus-visible,
       .adm-reject-btn:focus-visible,
@@ -790,53 +609,20 @@ const openBankerModal = () => {
   /* ── LOADING ── */
   if (loading) {
     return (
-      <div style={s.root}>
+      <AdminLayout adminName={adminName} handleLogout={handleLogout}>
         {globalStyles}
-        {sidebarMarkup}
-        <main className="adm-main" style={s.main}>
-          <div style={{ ...s.card, textAlign: "center", color: palette.text400, padding: "60px 24px" }}>
-            Loading application…
-          </div>
-        </main>
-      </div>
+        <div style={{ ...s.card, textAlign: "center", color: palette.text400, padding: "60px 24px" }}>
+          Loading application…
+        </div>
+      </AdminLayout>
     );
   }
 
   /* ── NOT FOUND ── */
   if (!application) {
     return (
-      <div style={s.root}>
+      <AdminLayout adminName={adminName} handleLogout={handleLogout}>
         {globalStyles}
-        {sidebarMarkup}
-        <main className="adm-main" style={s.main}>
-          <button
-            className="adm-back-btn"
-            onClick={() => router.back()}
-            style={{
-              marginBottom: 20, display: "flex", alignItems: "center", gap: 8,
-              border: `1px solid ${palette.border}`, background: palette.surface,
-              padding: "10px 16px", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 600,
-            }}
-          >
-            <FaArrowLeft size={12} /> Back
-          </button>
-          <div style={{ ...s.card, textAlign: "center", color: palette.text500, padding: "60px 24px" }}>
-            <FaExclamationTriangle size={28} color={palette.text400} style={{ marginBottom: 12 }} />
-            <div>Application not found.</div>
-          </div>
-        </main>
-      </div>
-    );
-  }
-
-  const applicantName = application.full_name || application.user_name || "—";
-
-  return (
-    <div style={s.root}>
-      {globalStyles}
-      {sidebarMarkup}
-
-      <main className="adm-main" style={s.main}>
         <button
           className="adm-back-btn"
           onClick={() => router.back()}
@@ -848,335 +634,377 @@ const openBankerModal = () => {
         >
           <FaArrowLeft size={12} /> Back
         </button>
+        <div style={{ ...s.card, textAlign: "center", color: palette.text500, padding: "60px 24px" }}>
+          <FaExclamationTriangle size={28} color={palette.text400} style={{ marginBottom: 12 }} />
+          <div>Application not found.</div>
+        </div>
+      </AdminLayout>
+    );
+  }
 
-        {banner && <Banner type={banner.type} message={banner.message} />}
+  const applicantName = application.full_name || application.user_name || "—";
 
-        {/* APPLICATION DETAILS — unchanged */}
-        <div style={s.card}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 14, marginBottom: 20 }}>
-            <h2 style={{ ...s.cardTitle, marginBottom: 0 }}>
-              <FaFileInvoiceDollar />
-              Application Details
-            </h2>
-            <StatusBadge status={application.status} />
+  return (
+    <AdminLayout adminName={adminName} handleLogout={handleLogout}>
+      {globalStyles}
+
+      <button
+        className="adm-back-btn"
+        onClick={() => router.back()}
+        style={{
+          marginBottom: 20, display: "flex", alignItems: "center", gap: 8,
+          border: `1px solid ${palette.border}`, background: palette.surface,
+          padding: "10px 16px", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 600,
+        }}
+      >
+        <FaArrowLeft size={12} /> Back
+      </button>
+
+      {banner && <Banner type={banner.type} message={banner.message} />}
+
+      {/* APPLICATION DETAILS */}
+      <div style={s.card}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 14, marginBottom: 20 }}>
+          <h2 style={{ ...s.cardTitle, marginBottom: 0 }}>
+            <FaFileInvoiceDollar />
+            Application Details
+          </h2>
+          <StatusBadge status={application.status} />
+        </div>
+
+        <div className="adm-field-grid" style={s.fieldGrid}>
+          <div>
+            <div style={s.fieldLabel}>Application ID</div>
+            <div style={{ ...s.fieldValue, fontFamily: "monospace", fontSize: 13.5 }}>
+              {application.application_number || application.id}
+            </div>
           </div>
 
-          <div className="adm-field-grid" style={s.fieldGrid}>
-            <div>
-              <div style={s.fieldLabel}>Application ID</div>
-              <div style={{ ...s.fieldValue, fontFamily: "monospace", fontSize: 13.5 }}>
-                {application.application_number || application.id}
-              </div>
-            </div>
+          <div>
+            <div style={s.fieldLabel}>Applicant Name</div>
+            <div style={s.fieldValue}>{applicantName}</div>
+          </div>
 
-            <div>
-              <div style={s.fieldLabel}>Applicant Name</div>
-              <div style={s.fieldValue}>{applicantName}</div>
-            </div>
+          <div>
+            <div style={s.fieldLabel}><FaUniversity size={10} /> Bank</div>
+            <div style={s.fieldValue}>{application.bank_name || "—"}</div>
+          </div>
 
-            <div>
-              <div style={s.fieldLabel}><FaUniversity size={10} /> Bank</div>
-              <div style={s.fieldValue}>{application.bank_name || "—"}</div>
+          <div>
+            <div style={s.fieldLabel}><FaRupeeSign size={10} /> Loan Amount</div>
+            <div style={{ ...s.fieldValue, fontFamily: "'Outfit','Inter',sans-serif", color: palette.primary, fontVariantNumeric: "tabular-nums" }}>
+              {application.loan_amount != null ? "₹" + Number(application.loan_amount).toLocaleString("en-IN") : "—"}
             </div>
+          </div>
 
-            <div>
-              <div style={s.fieldLabel}><FaRupeeSign size={10} /> Loan Amount</div>
-              <div style={{ ...s.fieldValue, fontFamily: "'Outfit','Inter',sans-serif", color: palette.primary, fontVariantNumeric: "tabular-nums" }}>
-                {application.loan_amount != null ? "₹" + Number(application.loan_amount).toLocaleString("en-IN") : "—"}
-              </div>
-            </div>
-
-            <div>
-              <div style={s.fieldLabel}><FaCalendarAlt size={10} /> Created At</div>
-              <div style={s.fieldValue}>
-                {application.created_at ? new Date(application.created_at).toLocaleString("en-IN") : "—"}
-              </div>
+          <div>
+            <div style={s.fieldLabel}><FaCalendarAlt size={10} /> Created At</div>
+            <div style={s.fieldValue}>
+              {application.created_at ? new Date(application.created_at).toLocaleString("en-IN") : "—"}
             </div>
           </div>
         </div>
+      </div>
 
-        {/* ════════════════ NEW SECTIONS START ════════════════ */}
-
-        {/* LOAN DETAILS */}
-        <div style={s.card}>
-          <h2 style={s.cardTitle}>
-            <FaMoneyBillWave />
-            Loan Details
-          </h2>
-          <div className="adm-field-grid" style={s.fieldGrid}>
-            <div>
-              <div style={s.fieldLabel}>Loan Service</div>
-              <div style={{ ...s.fieldValue, textTransform: "capitalize" }}>
-                {application.loan_type ? String(application.loan_type).replace(/_/g, " ") : "—"}
-              </div>
+      {/* LOAN DETAILS */}
+      <div style={s.card}>
+        <h2 style={s.cardTitle}>
+          <FaMoneyBillWave />
+          Loan Details
+        </h2>
+        <div className="adm-field-grid" style={s.fieldGrid}>
+          <div>
+            <div style={s.fieldLabel}>Loan Service</div>
+            <div style={{ ...s.fieldValue, textTransform: "capitalize" }}>
+              {application.loan_type ? String(application.loan_type).replace(/_/g, " ") : "—"}
             </div>
+          </div>
 
-            <div>
-              <div style={s.fieldLabel}>Tenure</div>
-              <div style={s.fieldValue}>
-                {application.tenure ? `${application.tenure} Year${Number(application.tenure) > 1 ? "s" : ""}` : "—"}
-              </div>
+          <div>
+            <div style={s.fieldLabel}>Tenure</div>
+            <div style={s.fieldValue}>
+              {application.tenure ? `${application.tenure} Year${Number(application.tenure) > 1 ? "s" : ""}` : "—"}
             </div>
+          </div>
 
-            <div>
-              <div style={s.fieldLabel}>Purpose</div>
-              <div style={{ ...s.fieldValue, textTransform: "capitalize" }}>
-                {application.loan_purpose ? String(application.loan_purpose).replace(/_/g, " ") : "—"}
-              </div>
+          <div>
+            <div style={s.fieldLabel}>Purpose</div>
+            <div style={{ ...s.fieldValue, textTransform: "capitalize" }}>
+              {application.loan_purpose ? String(application.loan_purpose).replace(/_/g, " ") : "—"}
             </div>
+          </div>
 
-            {application.vehicle_details && (
+          {application.vehicle_details && (
+            <div>
+              <div style={s.fieldLabel}>Vehicle Details</div>
+              <div style={s.fieldValue}>{application.vehicle_details}</div>
+            </div>
+          )}
+
+          {application.updated_at && (
+            <div>
+              <div style={s.fieldLabel}>Last Updated</div>
+              <div style={s.fieldValue}>{fmtDate(application.updated_at)}</div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* PERSONAL DETAILS */}
+      <div style={s.card}>
+        <h2 style={s.cardTitle}>
+          <FaUser />
+          Personal Details
+        </h2>
+        <div className="adm-field-grid" style={s.fieldGrid}>
+          <div>
+            <div style={s.fieldLabel}>Full Name</div>
+            <div style={s.fieldValue}>{application.full_name || "—"}</div>
+          </div>
+          <div>
+            <div style={s.fieldLabel}>Email</div>
+            <div style={s.fieldValue}>{application.email || "—"}</div>
+          </div>
+          <div>
+            <div style={s.fieldLabel}>Mobile</div>
+            <div style={s.fieldValue}>{application.mobile || "—"}</div>
+          </div>
+          <div>
+            <div style={s.fieldLabel}>Date of Birth</div>
+            <div style={s.fieldValue}>{fmtDate(application.dob)}</div>
+          </div>
+          <div>
+            <div style={s.fieldLabel}>Employment</div>
+            <div style={{ ...s.fieldValue, textTransform: "capitalize" }}>
+              {application.employment_type ? String(application.employment_type).replace(/_/g, " ") : "—"}
+            </div>
+          </div>
+          <div>
+            <div style={s.fieldLabel}>Annual Income</div>
+            <div style={s.fieldValue}>{application.annual_income ? fmt(application.annual_income) : "—"}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* ADDRESS DETAILS */}
+      <div style={s.card}>
+        <h2 style={s.cardTitle}>
+          <FaMapMarkerAlt />
+          Address Details
+        </h2>
+        <div className="adm-field-grid" style={s.fieldGrid}>
+          <div>
+            <div style={s.fieldLabel}>Address</div>
+            <div style={s.fieldValue}>{application.address || "—"}</div>
+          </div>
+          <div>
+            <div style={s.fieldLabel}>City</div>
+            <div style={s.fieldValue}>{application.city || "—"}</div>
+          </div>
+          <div>
+            <div style={s.fieldLabel}>State</div>
+            <div style={s.fieldValue}>{application.state || "—"}</div>
+          </div>
+          <div>
+            <div style={s.fieldLabel}>Pincode</div>
+            <div style={s.fieldValue}>{application.pincode || "—"}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* KYC DETAILS */}
+      <div style={s.card}>
+        <h2 style={s.cardTitle}>
+          <FaIdCard />
+          KYC Details
+        </h2>
+        <div className="adm-field-grid" style={s.fieldGrid}>
+          <div>
+            <div style={s.fieldLabel}>Aadhaar Number</div>
+            <div style={s.fieldValue}>{mask(application.aadhaar_number, 4)}</div>
+          </div>
+          <div>
+            <div style={s.fieldLabel}>PAN Number</div>
+            <div style={s.fieldValue}>{mask(application.pan_number, 3)}</div>
+          </div>
+
+          {application.co_applicant_name && (
+            <>
+              <div style={s.sectionDivider} />
+              <div style={s.subHeading}>Co-Applicant</div>
+
               <div>
-                <div style={s.fieldLabel}>Vehicle Details</div>
-                <div style={s.fieldValue}>{application.vehicle_details}</div>
+                <div style={s.fieldLabel}>Name</div>
+                <div style={s.fieldValue}>{application.co_applicant_name}</div>
               </div>
-            )}
-
-            {application.updated_at && (
               <div>
-                <div style={s.fieldLabel}>Last Updated</div>
-                <div style={s.fieldValue}>{fmtDate(application.updated_at)}</div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* PERSONAL DETAILS */}
-        <div style={s.card}>
-          <h2 style={s.cardTitle}>
-            <FaUser />
-            Personal Details
-          </h2>
-          <div className="adm-field-grid" style={s.fieldGrid}>
-            <div>
-              <div style={s.fieldLabel}>Full Name</div>
-              <div style={s.fieldValue}>{application.full_name || "—"}</div>
-            </div>
-            <div>
-              <div style={s.fieldLabel}>Email</div>
-              <div style={s.fieldValue}>{application.email || "—"}</div>
-            </div>
-            <div>
-              <div style={s.fieldLabel}>Mobile</div>
-              <div style={s.fieldValue}>{application.mobile || "—"}</div>
-            </div>
-            <div>
-              <div style={s.fieldLabel}>Date of Birth</div>
-              <div style={s.fieldValue}>{fmtDate(application.dob)}</div>
-            </div>
-            <div>
-              <div style={s.fieldLabel}>Employment</div>
-              <div style={{ ...s.fieldValue, textTransform: "capitalize" }}>
-                {application.employment_type ? String(application.employment_type).replace(/_/g, " ") : "—"}
-              </div>
-            </div>
-            <div>
-              <div style={s.fieldLabel}>Annual Income</div>
-              <div style={s.fieldValue}>{application.annual_income ? fmt(application.annual_income) : "—"}</div>
-            </div>
-          </div>
-        </div>
-
-        {/* ADDRESS DETAILS */}
-        <div style={s.card}>
-          <h2 style={s.cardTitle}>
-            <FaMapMarkerAlt />
-            Address Details
-          </h2>
-          <div className="adm-field-grid" style={s.fieldGrid}>
-            <div>
-              <div style={s.fieldLabel}>Address</div>
-              <div style={s.fieldValue}>{application.address || "—"}</div>
-            </div>
-            <div>
-              <div style={s.fieldLabel}>City</div>
-              <div style={s.fieldValue}>{application.city || "—"}</div>
-            </div>
-            <div>
-              <div style={s.fieldLabel}>State</div>
-              <div style={s.fieldValue}>{application.state || "—"}</div>
-            </div>
-            <div>
-              <div style={s.fieldLabel}>Pincode</div>
-              <div style={s.fieldValue}>{application.pincode || "—"}</div>
-            </div>
-          </div>
-        </div>
-
-        {/* KYC DETAILS */}
-        <div style={s.card}>
-          <h2 style={s.cardTitle}>
-            <FaIdCard />
-            KYC Details
-          </h2>
-          <div className="adm-field-grid" style={s.fieldGrid}>
-            <div>
-              <div style={s.fieldLabel}>Aadhaar Number</div>
-              <div style={s.fieldValue}>{mask(application.aadhaar_number, 4)}</div>
-            </div>
-            <div>
-              <div style={s.fieldLabel}>PAN Number</div>
-              <div style={s.fieldValue}>{mask(application.pan_number, 3)}</div>
-            </div>
-
-            {application.co_applicant_name && (
-              <>
-                <div style={s.sectionDivider} />
-                <div style={s.subHeading}>Co-Applicant</div>
-
-                <div>
-                  <div style={s.fieldLabel}>Name</div>
-                  <div style={s.fieldValue}>{application.co_applicant_name}</div>
+                <div style={s.fieldLabel}>Aadhaar</div>
+                <div style={s.fieldValue}>
+                  {application.co_applicant_aadhaar ? mask(application.co_applicant_aadhaar, 4) : "—"}
                 </div>
-                <div>
-                  <div style={s.fieldLabel}>Aadhaar</div>
-                  <div style={s.fieldValue}>
-                    {application.co_applicant_aadhaar ? mask(application.co_applicant_aadhaar, 4) : "—"}
-                  </div>
+              </div>
+              <div>
+                <div style={s.fieldLabel}>PAN</div>
+                <div style={s.fieldValue}>
+                  {application.co_applicant_pan ? mask(application.co_applicant_pan, 3) : "—"}
                 </div>
-                <div>
-                  <div style={s.fieldLabel}>PAN</div>
-                  <div style={s.fieldValue}>
-                    {application.co_applicant_pan ? mask(application.co_applicant_pan, 3) : "—"}
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
+              </div>
+            </>
+          )}
         </div>
+      </div>
 
-        {/* FILED BY CA — only when relevant */}
-        {application.applied_by === "ca" && application.ca_name && (
-          <div style={s.card}>
-            <h2 style={s.cardTitle}>
-              <FaUniversity />
-              Filed by CA
-            </h2>
-            <div className="adm-field-grid" style={s.fieldGrid}>
-              <div>
-                <div style={s.fieldLabel}>CA Name</div>
-                <div style={s.fieldValue}>{application.ca_name}</div>
-              </div>
-              <div>
-                <div style={s.fieldLabel}>CA Email</div>
-                <div style={s.fieldValue}>{application.ca_email || "—"}</div>
-              </div>
-              <div>
-                <div style={s.fieldLabel}>CA Firm</div>
-                <div style={s.fieldValue}>{application.ca_firm || "—"}</div>
-              </div>
+      {/* FILED BY DSA */}
+      {application.applied_by === "dsa" && application.dsa_name && (
+        <div style={s.card}>
+          <h2 style={s.cardTitle}>
+            <FaUsers />
+            Filed by DSA
+          </h2>
+
+          <div className="adm-field-grid" style={s.fieldGrid}>
+            <div>
+              <div style={s.fieldLabel}>DSA Name</div>
+              <div style={s.fieldValue}>{application.dsa_name}</div>
+            </div>
+
+            <div>
+              <div style={s.fieldLabel}>DSA Email</div>
+              <div style={s.fieldValue}>{application.dsa_email || "—"}</div>
+            </div>
+
+            <div>
+              <div style={s.fieldLabel}>Agency Name</div>
+              <div style={s.fieldValue}>{application.agency_name || "—"}</div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* FILED BY CA */}
+      {application.applied_by === "ca" && application.ca_name && (
+        <div style={s.card}>
+          <h2 style={s.cardTitle}>
+            <FaUniversity />
+            Filed by CA
+          </h2>
+          <div className="adm-field-grid" style={s.fieldGrid}>
+            <div>
+              <div style={s.fieldLabel}>CA Name</div>
+              <div style={s.fieldValue}>{application.ca_name}</div>
+            </div>
+            <div>
+              <div style={s.fieldLabel}>CA Email</div>
+              <div style={s.fieldValue}>{application.ca_email || "—"}</div>
+            </div>
+            <div>
+              <div style={s.fieldLabel}>CA Firm</div>
+              <div style={s.fieldValue}>{application.ca_firm || "—"}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* UPLOADED DOCUMENTS */}
+      <div style={s.card}>
+        <h2 style={s.cardTitle}>
+          <FaFileImage />
+          Uploaded Documents
+        </h2>
+
+        {application.documents && Object.keys(application.documents).length > 0 ? (
+          <div style={s.docGrid}>
+            {Object.entries(
+              application.documents as Record<string, { name: string; uploadedAt: string; filePath?: string }>
+            ).map(([key, doc]) => (
+              <div key={key} style={s.docItem}>
+                <div style={s.docItemIcon}>
+                  {isPdfFile(doc.name) ? (
+                    <FaFilePdf size={20} color={palette.danger} />
+                  ) : (
+                    <FaFileImage size={20} color={palette.primary} />
+                  )}
+                </div>
+                <div style={s.docItemInfo}>
+                  <div style={s.docItemLabel}>{key.replace(/_/g, " ")}</div>
+                  <div style={s.docItemName}>{doc.name}</div>
+                  <div style={s.docItemDate}>Uploaded: {doc.uploadedAt}</div>
+                </div>
+                <button className="adm-preview-btn" style={s.previewBtn} onClick={() => handlePreview(doc)}>
+                  <FaEye size={12} /> {isImageFile(doc.name) ? "Preview" : "Open"}
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={s.noDocText}>No documents uploaded.</div>
         )}
+      </div>
 
-        {/* UPLOADED DOCUMENTS — with preview */}
-        <div style={s.card}>
-          <h2 style={s.cardTitle}>
-            <FaFileImage />
-            Uploaded Documents
-          </h2>
+      {/* REMARK */}
+      <div style={s.card}>
+        <h2 style={s.cardTitle}>Admin Remark</h2>
 
-          {application.documents && Object.keys(application.documents).length > 0 ? (
-            <div style={s.docGrid}>
-              {Object.entries(
-                application.documents as Record<string, { name: string; uploadedAt: string; filePath?: string }>
-              ).map(([key, doc]) => (
-                <div key={key} style={s.docItem}>
-                  <div style={s.docItemIcon}>
-                    {isPdfFile(doc.name) ? (
-                      <FaFilePdf size={20} color={palette.danger} />
-                    ) : (
-                      <FaFileImage size={20} color={palette.primary} />
-                    )}
-                  </div>
-                  <div style={s.docItemInfo}>
-                    <div style={s.docItemLabel}>{key.replace(/_/g, " ")}</div>
-                    <div style={s.docItemName}>{doc.name}</div>
-                    <div style={s.docItemDate}>Uploaded: {doc.uploadedAt}</div>
-                  </div>
-                  <button className="adm-preview-btn" style={s.previewBtn} onClick={() => handlePreview(doc)}>
-                    <FaEye size={12} /> {isImageFile(doc.name) ? "Preview" : "Open"}
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div style={s.noDocText}>No documents uploaded.</div>
+        <textarea
+          className="adm-textarea"
+          value={remark}
+          onChange={(e) => setRemark(e.target.value)}
+          placeholder="Enter approval / rejection note…"
+          style={s.textarea}
+        />
+
+        <div style={{ display: "flex", gap: 14, marginTop: 16, flexWrap: "wrap" }}>
+          <button
+            className="adm-approve-btn"
+            disabled={saving !== null || application.status?.toLowerCase() === "approved" || application.status?.toLowerCase() === "rejected"}
+            onClick={() => updateStatus("approved")}
+            style={s.approveBtn}
+          >
+            <FaCheckCircle /> {saving === "approved" ? "Approving…" : "Approve"}
+          </button>
+
+          <button
+            className="adm-reject-btn"
+            disabled={saving !== null || application.status?.toLowerCase() === "approved" || application.status?.toLowerCase() === "rejected"}
+            onClick={() => updateStatus("rejected")}
+            style={s.rejectBtn}
+          >
+            <FaTimesCircle /> {saving === "rejected" ? "Rejecting…" : "Reject"}
+          </button>
+
+          {application.status?.toLowerCase() === "approved" && (
+            <button className="adm-send-banker-btn" onClick={openBankerModal} style={s.sendBankerBtn}>
+              <FaPaperPlane /> Send to Bankers
+            </button>
           )}
         </div>
+      </div>
 
-        {/* ════════════════ NEW SECTIONS END ════════════════ */}
+      {/* HISTORY */}
+      <div style={s.card}>
+        <h2 style={s.cardTitle}>
+          <FaHistory />
+          Remarks History
+        </h2>
 
-        {/* REMARK — unchanged */}
-        <div style={s.card}>
-          <h2 style={s.cardTitle}>Admin Remark</h2>
-
-          <textarea
-            className="adm-textarea"
-            value={remark}
-            onChange={(e) => setRemark(e.target.value)}
-            placeholder="Enter approval / rejection note…"
-            style={s.textarea}
-          />
-
-          <div style={{ display: "flex", gap: 14, marginTop: 16, flexWrap: "wrap" }}>
-            <button
-              className="adm-approve-btn"
-              disabled={saving !== null || application.status?.toLowerCase() === "approved" || application.status?.toLowerCase() === "rejected"}
-              onClick={() => updateStatus("approved")}
-              style={s.approveBtn}
-            >
-              <FaCheckCircle /> {saving === "approved" ? "Approving…" : "Approve"}
-            </button>
-
-            <button
-              className="adm-reject-btn"
-              disabled={saving !== null || application.status?.toLowerCase() === "approved" || application.status?.toLowerCase() === "rejected"}
-              onClick={() => updateStatus("rejected")}
-              style={s.rejectBtn}
-            >
-              <FaTimesCircle /> {saving === "rejected" ? "Rejecting…" : "Reject"}
-            </button>
-
-            {application.status?.toLowerCase() === "approved" && (
-              <button
-                className="adm-send-banker-btn"
-                onClick={openBankerModal}
-                style={s.sendBankerBtn}
-              >
-                <FaPaperPlane /> Send to Bankers
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* HISTORY — unchanged */}
-        <div style={s.card}>
-          <h2 style={s.cardTitle}>
-            <FaHistory />
-            Remarks History
-          </h2>
-
-          {remarks.length === 0 ? (
-            <p style={{ color: palette.text400, fontSize: 14 }}>No remarks yet.</p>
-          ) : (
-            remarks.map((item) => (
-              <div key={item.id} style={s.remarkItem}>
-                <div style={s.remarkHead}>
-                  <StatusBadge status={item.status} size="sm" />
-                  <span style={s.remarkDate}>
-                    {item.created_at ? new Date(item.created_at).toLocaleString("en-IN") : "—"}
-                  </span>
-                </div>
-                <p style={s.remarkText}>{item.remark}</p>
+        {remarks.length === 0 ? (
+          <p style={{ color: palette.text400, fontSize: 14 }}>No remarks yet.</p>
+        ) : (
+          remarks.map((item) => (
+            <div key={item.id} style={s.remarkItem}>
+              <div style={s.remarkHead}>
+                <StatusBadge status={item.status} size="sm" />
+                <span style={s.remarkDate}>
+                  {item.created_at ? new Date(item.created_at).toLocaleString("en-IN") : "—"}
+                </span>
               </div>
-            ))
-          )}
-        </div>
-      </main>
+              <p style={s.remarkText}>{item.remark}</p>
+            </div>
+          ))
+        )}
+      </div>
 
-      {/* NEW: document preview modal (images only) */}
-{/* NEW: document preview modal (images only) */}
+      {/* document preview modal (images only) */}
       {previewDoc && (
         <div style={s.modalOverlay} onClick={() => setPreviewDoc(null)}>
           <div style={s.modalBox} onClick={(e) => e.stopPropagation()}>
@@ -1189,7 +1017,7 @@ const openBankerModal = () => {
         </div>
       )}
 
-      {/* NEW: send-to-banker modal */}
+      {/* send-to-banker modal */}
       {showBankerModal && (
         <div style={s.modalOverlay} onClick={closeBankerModal}>
           <div style={{ ...s.modalBox, maxWidth: 480, width: "100%" }} onClick={(e) => e.stopPropagation()}>
@@ -1245,6 +1073,6 @@ const openBankerModal = () => {
           </div>
         </div>
       )}
-    </div>
+    </AdminLayout>
   );
 }

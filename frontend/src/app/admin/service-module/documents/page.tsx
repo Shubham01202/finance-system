@@ -23,8 +23,8 @@ interface LoanService {
 
 interface DocumentType {
   id: number;
-  loan_service_id: number;
-  loan_service_name?: string;
+  loan_service_ids: number[];
+  loan_service_names?: string[];
   document_name: string;
   is_required: boolean;
   is_active: boolean;
@@ -34,7 +34,7 @@ interface DocumentType {
 
 interface FormState {
   id: number | null;
-  loan_service_id: string;
+  loan_service_ids: string[];
   document_name: string;
   is_required: boolean;
   max_size_mb: string;
@@ -45,7 +45,7 @@ const FILE_TYPE_OPTIONS = ["pdf", "jpg", "jpeg", "png", "webp"];
 
 const emptyForm: FormState = {
   id: null,
-  loan_service_id: "",
+  loan_service_ids: [],
   document_name: "",
   is_required: true,
   max_size_mb: "5",
@@ -127,17 +127,17 @@ export default function ManageDocumentsPage() {
     setModalOpen(true);
   };
 
-  const openEditModal = (doc: DocumentType) => {
-    setForm({
-      id: doc.id,
-      loan_service_id: String(doc.loan_service_id),
-      document_name: doc.document_name,
-      is_required: doc.is_required,
-      max_size_mb: String(doc.max_size_mb),
-      allowed_file_types: doc.allowed_file_types || [],
-    });
-    setModalOpen(true);
-  };
+ const openEditModal = (doc: DocumentType) => {
+  setForm({
+    id: doc.id,
+    loan_service_ids: (doc.loan_service_ids || []).map(String),
+    document_name: doc.document_name,
+    is_required: doc.is_required,
+    max_size_mb: String(doc.max_size_mb),
+    allowed_file_types: doc.allowed_file_types || [],
+  });
+  setModalOpen(true);
+};
 
   const closeModal = () => {
     if (saving) return;
@@ -153,12 +153,21 @@ export default function ManageDocumentsPage() {
     }));
   };
 
+  const toggleLoanService = (id: number) => {
+  setForm((prev) => ({
+    ...prev,
+    loan_service_ids: prev.loan_service_ids.includes(String(id))
+      ? prev.loan_service_ids.filter((sid) => sid !== String(id))
+      : [...prev.loan_service_ids, String(id)],
+  }));
+};
+
   /* ── SAVE (create or update) ── */
-  const handleSave = async () => {
-    if (!form.loan_service_id || !form.document_name.trim()) {
-      showMessage("error", "Loan service and document name are required.");
-      return;
-    }
+const handleSave = async () => {
+  if (form.loan_service_ids.length === 0 || !form.document_name.trim()) {
+    showMessage("error", "Select at least one loan service and enter a document name.");
+    return;
+  }
     if (form.allowed_file_types.length === 0) {
       showMessage("error", "Select at least one allowed file type.");
       return;
@@ -178,12 +187,12 @@ export default function ManageDocumentsPage() {
           Authorization: `Bearer ${token()}`,
         },
         body: JSON.stringify({
-          loan_service_id: Number(form.loan_service_id),
-          document_name: form.document_name.trim(),
-          is_required: form.is_required,
-          max_size_mb: Number(form.max_size_mb),
-          allowed_file_types: form.allowed_file_types,
-        }),
+    loan_service_ids: form.loan_service_ids.map(Number),
+    document_name: form.document_name.trim(),
+    is_required: form.is_required,
+    max_size_mb: Number(form.max_size_mb),
+    allowed_file_types: form.allowed_file_types,
+  }),
       });
 
       const data = await res.json();
@@ -352,7 +361,19 @@ export default function ManageDocumentsPage() {
                 <tbody>
                   {documents.map((doc) => (
                     <tr key={doc.id} className="border-b border-slate-100 hover:bg-slate-50/60">
-                      <td className="px-4 py-3 font-semibold text-slate-700">{doc.loan_service_name || "—"}</td>
+                    <td className="px-4 py-3 font-semibold text-slate-700">
+  <div className="flex flex-wrap gap-1">
+    {doc.loan_service_names && doc.loan_service_names.length > 0 ? (
+      doc.loan_service_names.map((n) => (
+        <span key={n} className="text-[10px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+          {n}
+        </span>
+      ))
+    ) : (
+      <span className="text-slate-400">—</span>
+    )}
+  </div>
+</td>
                       <td className="px-4 py-3 text-slate-800">{doc.document_name}</td>
                       <td className="px-4 py-3">
                         {doc.is_required ? (
@@ -424,19 +445,28 @@ export default function ManageDocumentsPage() {
             </div>
 
             <div className="flex flex-col gap-4">
-              <div>
-                <label className="text-[13px] font-semibold text-slate-700 mb-1.5 block">Loan Service</label>
-                <select
-                  value={form.loan_service_id}
-                  onChange={(e) => setForm((p) => ({ ...p, loan_service_id: e.target.value }))}
-                  className="w-full border border-slate-200 rounded-lg py-2.5 px-3.5 text-sm bg-slate-50 outline-none"
-                >
-                  <option value="">Select loan service</option>
-                  {loanServices.map((ls) => (
-                    <option key={ls.id} value={ls.id}>{ls.name}</option>
-                  ))}
-                </select>
-              </div>
+            <div>
+  <label className="text-[13px] font-semibold text-slate-700 mb-1.5 block">Loan Services</label>
+  <div className="border border-slate-200 rounded-lg p-3 bg-slate-50 max-h-48 overflow-y-auto flex flex-col gap-2">
+    {loanServices.map((ls) => {
+      const checked = form.loan_service_ids.includes(String(ls.id));
+      return (
+        <label key={ls.id} className="flex items-center gap-2.5 cursor-pointer text-sm text-slate-700">
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={() => toggleLoanService(ls.id)}
+            className="w-4 h-4"
+          />
+          {ls.name}
+        </label>
+      );
+    })}
+  </div>
+  <p className="text-[11px] text-slate-400 mt-1.5">
+    Checked services will show this document on their application forms. Unchecked = hidden from that service.
+  </p>
+</div>
 
               <div>
                 <label className="text-[13px] font-semibold text-slate-700 mb-1.5 block">Document Name</label>

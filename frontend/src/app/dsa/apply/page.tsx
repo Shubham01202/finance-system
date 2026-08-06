@@ -1,4 +1,4 @@
-// Path: frontend/src/app/ca/apply/page.tsx
+// Path: frontend/src/app/dsa/apply/page.tsx
 "use client";
 
 import { useState, useEffect, useRef, forwardRef } from "react";
@@ -9,7 +9,7 @@ import {
   FaCalendarAlt, FaArrowLeft, FaUpload, FaFilePdf,
   FaFileImage, FaTrash, FaShieldAlt, FaCar,
 } from "react-icons/fa";
-import CALayout from "./../../../components/layout/ca/CALayout";
+import DSALayout from "./../../../components/layout/dsa/DSALayout";
 
 /* ─────────────────────────────────────────────
    TYPES
@@ -67,7 +67,7 @@ const formatTenure = (t: TenureOption) => {
 /* ─────────────────────────────────────────────
    PAGE
 ───────────────────────────────────────────── */
-export default function CAApplyPage() {
+export default function DSAApplyPage() {
   const router = useRouter();
 
   const [step, setStep]           = useState(1);
@@ -76,7 +76,7 @@ export default function CAApplyPage() {
   const [banks, setBanks]         = useState<any[]>([]);
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading]     = useState(false);
-  const [userName, setUserName]   = useState("CA");
+  const [userName, setUserName]   = useState("DSA");
 
   const inputsRef = useRef<(HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null)[]>([]);
   const setRef = (i: number) =>
@@ -109,8 +109,8 @@ export default function CAApplyPage() {
     if (!token) { router.push("/"); return; }
     try {
       const user = JSON.parse(localStorage.getItem("user") || "{}");
-      if (user.role !== "ca") { router.push("/dashboard"); return; }
-      setUserName(user.full_name || "CA");
+      if (user.role !== "dsa") { router.push("/dashboard"); return; }
+      setUserName(user.full_name || "DSA");
     } catch {}
 
     fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/loan/banks`)
@@ -270,7 +270,7 @@ const documentMeta: Record<string, { name: string; uploadedAt: string; dataUrl: 
     });
 
     try {
-     const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/ca/apply`, {
+     const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/dsa/loans/apply`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -285,7 +285,7 @@ const documentMeta: Record<string, { name: string; uploadedAt: string; dataUrl: 
       });
       const data = await res.json();
       if (res.status === 401) { router.push("/"); return; }
-      if (data.success) { setSubmitted(true); setTimeout(() => router.push("/ca/loans"), 2500); }
+      if (data.success) { setSubmitted(true); setTimeout(() => router.push("/dsa/loans"), 2500); }
       else setError(data.message || "Submission failed.");
     } catch { setError("Server error. Try again."); }
     finally { setLoading(false); }
@@ -302,8 +302,8 @@ const documentMeta: Record<string, { name: string; uploadedAt: string; dataUrl: 
   /* ── SUCCESS ── */
   if (submitted) {
     return (
-      <CALayout s={s} userName={userName} handleLogout={handleLogout}>
-        <div className="ca-success-wrap">
+      <DSALayout s={s} userName={userName} handleLogout={handleLogout}>
+        <div className="dsa-success-wrap">
           <div style={s.successCard}>
             <div style={{ display: "flex", justifyContent: "center", marginBottom: 20 }}>
               <FaCheckCircle size={60} color="#10b981" />
@@ -314,7 +314,7 @@ const documentMeta: Record<string, { name: string; uploadedAt: string; dataUrl: 
           </div>
         </div>
         <style jsx>{`
-          .ca-success-wrap {
+          .dsa-success-wrap {
             display: flex;
             align-items: center;
             justify-content: center;
@@ -322,7 +322,7 @@ const documentMeta: Record<string, { name: string; uploadedAt: string; dataUrl: 
             padding: 20px;
           }
         `}</style>
-      </CALayout>
+      </DSALayout>
     );
   }
 
@@ -333,13 +333,13 @@ const documentMeta: Record<string, { name: string; uploadedAt: string; dataUrl: 
      RENDER
   ───────────────────────────────────────────── */
   return (
-    <CALayout s={s} userName={userName} handleLogout={handleLogout}>
-      <div className="ca-apply-wrap">
+    <DSALayout s={s} userName={userName} handleLogout={handleLogout}>
+      <div className="dsa-apply-wrap">
 
         {/* Header */}
         <div style={s.topBar}>
           <div>
-            <button style={s.backBtn} onClick={() => router.push("/ca/loans")}>
+            <button style={s.backBtn} onClick={() => router.push("/dsa/loans")}>
               <FaArrowLeft size={12} /> Back to Applications
             </button>
             <h1 style={s.pageTitle}>New Loan Application</h1>
@@ -347,25 +347,25 @@ const documentMeta: Record<string, { name: string; uploadedAt: string; dataUrl: 
           </div>
         </div>
 
-        {/* CA Notice */}
+        {/* DSA Notice */}
         <div style={s.caNotice}>
           <FaUserTie size={16} color="#92400e" style={{ flexShrink: 0 }} />
           <div style={{ fontSize: 13, color: "#92400e" }}>
-            <strong>CA Filing Mode</strong> — This application will be linked to your CA account. Your name, email and firm will be recorded with this application.
+            <strong>DSA Filing Mode</strong> — This application will be linked to your DSA account. Your name, email and agency will be recorded with this application.
           </div>
         </div>
 
         {/* ── STEPPER ── */}
-        <div className="ca-stepper" style={s.stepperCard}>
+        <div className="dsa-stepper" style={s.stepperCard}>
           {stepLabels.map((label, i) => {
             const n = i + 1, isActive = n === step, isDone = n < step;
             return (
               <div key={n} style={s.stepItem}>
                 <div style={s.stepCol}>
-                  <div className="ca-step-circle" style={{ ...s.stepCircle, background: isDone ? "#10b981" : isActive ? "#1e3a5f" : "#e2e8f0", color: isDone || isActive ? "#fff" : "#94a3b8", boxShadow: isActive ? "0 0 0 4px rgba(30,58,95,0.2)" : "none", transform: isActive ? "scale(1.1)" : "scale(1)" }}>
+                  <div className="dsa-step-circle" style={{ ...s.stepCircle, background: isDone ? "#10b981" : isActive ? "#1e3a5f" : "#e2e8f0", color: isDone || isActive ? "#fff" : "#94a3b8", boxShadow: isActive ? "0 0 0 4px rgba(30,58,95,0.2)" : "none", transform: isActive ? "scale(1.1)" : "scale(1)" }}>
                     {isDone ? <FaCheckCircle size={13} /> : <span style={{ fontSize: 14 }}>{stepIcons[i]}</span>}
                   </div>
-                  <span className="ca-step-label" style={{ ...s.stepLabel, color: isActive ? "#1e3a5f" : isDone ? "#10b981" : "#94a3b8", fontWeight: isActive ? 700 : 500 }}>{label}</span>
+                  <span className="dsa-step-label" style={{ ...s.stepLabel, color: isActive ? "#1e3a5f" : isDone ? "#10b981" : "#94a3b8", fontWeight: isActive ? 700 : 500 }}>{label}</span>
                 </div>
                 {i < stepLabels.length - 1 && <div style={{ ...s.stepLine, background: isDone ? "#10b981" : "#e2e8f0" }} />}
               </div>
@@ -374,7 +374,7 @@ const documentMeta: Record<string, { name: string; uploadedAt: string; dataUrl: 
         </div>
 
         {/* ── FORM CARD ── */}
-        <div className="ca-form-card" style={s.formCard}>
+        <div className="dsa-form-card" style={s.formCard}>
           {error && <div style={s.errorBox}>⚠️ {error}</div>}
 
           {/* ════ STEP 1 — Customer Details ════ */}
@@ -517,7 +517,7 @@ const documentMeta: Record<string, { name: string; uploadedAt: string; dataUrl: 
               {formData.loan_amount && formData.tenure && Number(formData.loan_amount) >= 10000 && (
                 <div style={s.emiBox}>
                   <div style={s.emiTitle}>📊 Loan Summary Preview</div>
-                  <div className="ca-emi-grid" style={s.emiGrid}>
+                  <div className="dsa-emi-grid" style={s.emiGrid}>
                     <EmiItem label="Loan Amount" value={fmt(Number(formData.loan_amount))} />
                     <EmiItem label="Tenure" value={`${formData.tenure} Year${Number(formData.tenure) > 1 ? "s" : ""}`} />
                     <EmiItem label="Est. EMI @ 12% p.a." value={`₹${calcEMI(Number(formData.loan_amount), 12, Number(formData.tenure))}`} highlight />
@@ -545,7 +545,7 @@ const documentMeta: Record<string, { name: string; uploadedAt: string; dataUrl: 
                       <strong>{selectedLoanServiceName}</strong> · Allowed types and max size vary per document · * = required
                     </div>
                   </div>
-                  <div className="ca-doc-grid" style={s.docGrid}>
+                  <div className="dsa-doc-grid" style={s.docGrid}>
                     {documentTypes.map(doc => {
                       const uploaded = documents[doc.id];
                       const err      = docErrors[doc.id];
@@ -593,7 +593,7 @@ const documentMeta: Record<string, { name: string; uploadedAt: string; dataUrl: 
           )}
 
           {/* ── NAV BUTTONS ── */}
-          <div className="ca-nav-row" style={s.navRow}>
+          <div className="dsa-nav-row" style={s.navRow}>
             <button onClick={prevStep} disabled={step === 1} style={{ ...s.btnBack, opacity: step === 1 ? 0.4 : 1, cursor: step === 1 ? "not-allowed" : "pointer" }}>
               <FaArrowLeft size={12} /> Back
             </button>
@@ -610,55 +610,55 @@ const documentMeta: Record<string, { name: string; uploadedAt: string; dataUrl: 
 
       <style jsx>{`
         @media (max-width: 900px) {
-          .ca-form-card {
+          .dsa-form-card {
             padding: 20px 18px !important;
           }
 
-          .ca-stepper {
+          .dsa-stepper {
             padding: 14px 12px !important;
             overflow-x: auto;
           }
 
-          .ca-step-circle {
+          .dsa-step-circle {
             width: 30px !important;
             height: 30px !important;
           }
 
-          .ca-step-label {
+          .dsa-step-label {
             font-size: 9px !important;
           }
 
-          .ca-emi-grid {
+          .dsa-emi-grid {
             grid-template-columns: 1fr !important;
             gap: 12px !important;
           }
 
-          .ca-doc-grid {
+          .dsa-doc-grid {
             grid-template-columns: 1fr !important;
           }
 
-          .ca-nav-row {
+          .dsa-nav-row {
             flex-direction: column-reverse;
             gap: 10px;
           }
 
-          .ca-nav-row button {
+          .dsa-nav-row button {
             width: 100%;
             justify-content: center;
           }
         }
 
         @media (max-width: 480px) {
-          .ca-form-card {
+          .dsa-form-card {
             padding: 16px 14px !important;
           }
 
-          .ca-step-label {
+          .dsa-step-label {
             display: none;
           }
         }
       `}</style>
-    </CALayout>
+    </DSALayout>
   );
 }
 
@@ -713,13 +713,13 @@ function EmiItem({ label, value, highlight }: { label: string; value: string; hi
 /* ─────────────────────────────────────────────
    STYLES
    NOTE: page / sidebar / nav* / user* / logout* / main keys are consumed
-   by CALayout + CASidebar. Everything else styles this page's own content.
+   by DSALayout + DSASidebar. Everything else styles this page's own content.
 ───────────────────────────────────────────── */
 const s: Record<string, React.CSSProperties> = {
   page:    { display: "flex", minHeight: "100vh", background: "#f1f5f9", fontFamily: "'Segoe UI', system-ui, sans-serif" },
 
-  /* consumed by CASidebar */
-  sidebar: { width: 240, minHeight: "100vh", background: "linear-gradient(180deg,#1e3a5f 0%,#0f2340 100%)", display: "flex", flexDirection: "column", padding: "24px 14px", top: 0, height: "100vh", flexShrink: 0 },
+  /* consumed by DSASidebar */
+  sidebar: { width: 260, minHeight: "100vh", background: "linear-gradient(180deg,#1e3a5f 0%,#0f2340 100%)", display: "flex", flexDirection: "column", padding: "24px 14px", flexShrink: 0 },
   logo:     { display: "flex", alignItems: "center", gap: 10, paddingBottom: 16, borderBottom: "1px solid rgba(255,255,255,0.08)", marginBottom: 12, paddingLeft: 6 },
   logoIcon: { width: 30, height: 30, background: "rgba(255,255,255,0.15)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" },
   logoText: { color: "#fff", fontWeight: 800, fontSize: 17, letterSpacing: "-0.3px" },
@@ -736,7 +736,7 @@ const s: Record<string, React.CSSProperties> = {
   userRole: { color: "rgba(255,255,255,0.45)", fontSize: 11, marginTop: 2 },
   logoutBtn:{ display: "flex", alignItems: "center", gap: 9, padding: "10px 12px", color: "rgba(255,255,255,0.5)", background: "transparent", border: "none", borderRadius: 9, fontSize: 13, cursor: "pointer", marginTop: 4, width: "100%" },
 
-  /* consumed by CALayout */
+  /* consumed by DSALayout */
   main:     { flex: 1, padding: "28px 32px", overflowY: "auto" as const, minWidth: 0 },
 
   /* this page's own content */

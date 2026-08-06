@@ -32,7 +32,7 @@ interface RecentApp {
   created_at: string;
   bank_name?: string;
   applied_by?: string;
-  ca_name?: string;
+  agent_name?: string;
 }
 
 const statusConfig = {
@@ -217,7 +217,11 @@ export default function AdminDashboardPage() {
                           <span className={`text-[11px] font-bold px-2 py-1 rounded-md ${
                             app.applied_by === "ca" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"
                           }`}>
-                            {app.applied_by === "ca" ? `CA: ${app.ca_name || "CA"}` : "Customer"}
+                          {app.applied_by === "ca"
+  ? `CA: ${app.agent_name || "CA"}`
+  : app.applied_by === "dsa"
+  ? `DSA: ${app.agent_name || "DSA"}`
+  : "Customer"}
                           </span>
                         </td>
                         <Td className="text-slate-400 text-xs">
@@ -276,7 +280,11 @@ export default function AdminDashboardPage() {
                       <span className={`text-[11px] font-bold px-2 py-1 rounded-md ${
                         app.applied_by === "ca" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"
                       }`}>
-                        {app.applied_by === "ca" ? `CA: ${app.ca_name || "CA"}` : "Customer"}
+                     {app.applied_by === "ca"
+  ? `CA: ${app.agent_name || "CA"}`
+  : app.applied_by === "dsa"
+  ? `DSA: ${app.agent_name || "DSA"}`
+  : "Customer"}
                       </span>
                       <button
                         onClick={() => router.push(`/admin/applications/${app.id}`)}

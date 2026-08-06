@@ -23,8 +23,8 @@ interface LoanService {
 
 interface LoanTenure {
   id: number;
-  loan_service_id: number;
-  loan_service_name?: string;
+  loan_service_ids: number[];
+  loan_service_names?: string[];
   tenure_months: number;
   display_name: string | null;
   is_active: boolean;
@@ -32,14 +32,14 @@ interface LoanTenure {
 
 interface FormState {
   id: number | null;
-  loan_service_id: string;
+  loan_service_ids: string[];
   tenure_months: string;
   display_name: string;
 }
 
 const emptyForm: FormState = {
   id: null,
-  loan_service_id: "",
+  loan_service_ids: [],
   tenure_months: "",
   display_name: "",
 };
@@ -122,7 +122,7 @@ export default function LoanTenurePage() {
   const openEditModal = (item: LoanTenure) => {
     setForm({
       id: item.id,
-      loan_service_id: String(item.loan_service_id),
+      loan_service_ids: (item.loan_service_ids || []).map(String),
       tenure_months: String(item.tenure_months / 12),
       display_name: item.display_name || "",
     });
@@ -134,11 +134,19 @@ export default function LoanTenurePage() {
     setModalOpen(false);
   };
 
+  const toggleLoanService = (id: number) => {
+    setForm((prev) => ({
+      ...prev,
+      loan_service_ids: prev.loan_service_ids.includes(String(id))
+        ? prev.loan_service_ids.filter((sid) => sid !== String(id))
+        : [...prev.loan_service_ids, String(id)],
+    }));
+  };
+
   /* ── SAVE (create or update) ── */
- /* ── SAVE (create or update) ── */
   const handleSave = async () => {
-    if (!form.loan_service_id || !form.tenure_months) {
-      showMessage("error", "Loan service and tenure (years) are required.");
+    if (form.loan_service_ids.length === 0 || !form.tenure_months) {
+      showMessage("error", "Select at least one loan service and enter tenure (years).");
       return;
     }
 
@@ -156,7 +164,7 @@ export default function LoanTenurePage() {
           Authorization: `Bearer ${token()}`,
         },
         body: JSON.stringify({
-          loan_service_id: Number(form.loan_service_id),
+          loan_service_ids: form.loan_service_ids.map(Number),
           tenure_months: Math.round(Number(form.tenure_months) * 12),
           display_name: form.display_name.trim() || null,
         }),
@@ -320,7 +328,7 @@ export default function LoanTenurePage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200 text-left text-slate-500 text-[11px] uppercase tracking-wide font-bold">
-                    <th className="px-4 py-3">Loan Service</th>
+                    <th className="px-4 py-3">Loan Services</th>
                     <th className="px-4 py-3">Tenure</th>
                     <th className="px-4 py-3">Display Name</th>
                     <th className="px-4 py-3">Active</th>
@@ -330,7 +338,19 @@ export default function LoanTenurePage() {
                 <tbody>
                   {tenures.map((item) => (
                     <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50/60">
-                      <td className="px-4 py-3 font-semibold text-slate-700">{item.loan_service_name || "—"}</td>
+                      <td className="px-4 py-3 font-semibold text-slate-700">
+                        <div className="flex flex-wrap gap-1">
+                          {item.loan_service_names && item.loan_service_names.length > 0 ? (
+                            item.loan_service_names.map((n) => (
+                              <span key={n} className="text-[10px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                                {n}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-slate-400 font-normal">—</span>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-4 py-3 text-slate-800">{formatMonths(item.tenure_months)}</td>
                       <td className="px-4 py-3 text-slate-500">{item.display_name || "—"}</td>
                       <td className="px-4 py-3">
@@ -373,7 +393,7 @@ export default function LoanTenurePage() {
       {modalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={closeModal}>
           <div
-            className="bg-white rounded-2xl p-6 w-full max-w-md"
+            className="bg-white rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-between items-center mb-5">
@@ -387,17 +407,26 @@ export default function LoanTenurePage() {
 
             <div className="flex flex-col gap-4">
               <div>
-                <label className="text-[13px] font-semibold text-slate-700 mb-1.5 block">Loan Service</label>
-                <select
-                  value={form.loan_service_id}
-                  onChange={(e) => setForm((p) => ({ ...p, loan_service_id: e.target.value }))}
-                  className="w-full border border-slate-200 rounded-lg py-2.5 px-3.5 text-sm bg-slate-50 outline-none"
-                >
-                  <option value="">Select loan service</option>
-                  {loanServices.map((ls) => (
-                    <option key={ls.id} value={ls.id}>{ls.name}</option>
-                  ))}
-                </select>
+                <label className="text-[13px] font-semibold text-slate-700 mb-1.5 block">Loan Services</label>
+                <div className="border border-slate-200 rounded-lg p-3 bg-slate-50 max-h-48 overflow-y-auto flex flex-col gap-2">
+                  {loanServices.map((ls) => {
+                    const checked = form.loan_service_ids.includes(String(ls.id));
+                    return (
+                      <label key={ls.id} className="flex items-center gap-2.5 cursor-pointer text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleLoanService(ls.id)}
+                          className="w-4 h-4"
+                        />
+                        {ls.name}
+                      </label>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1.5">
+                  Checked services will show this tenure option. Unchecked = hidden from that service.
+                </p>
               </div>
 
               <div>

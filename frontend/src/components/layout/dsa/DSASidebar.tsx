@@ -19,7 +19,7 @@ type Props = {
   onClose: () => void;
 };
 
-export default function CASidebar({
+export default function DSASidebar({
   s,
   userName,
   handleLogout,
@@ -63,13 +63,13 @@ export default function CASidebar({
     <>
       {/* Backdrop — only visible on mobile when drawer is open */}
       <div
-        className={`ca-backdrop ${isOpen ? "ca-backdrop--visible" : ""}`}
+        className={`dsa-backdrop ${isOpen ? "dsa-backdrop--visible" : ""}`}
         onClick={onClose}
       />
 
-      <aside className={`ca-sidebar ${isOpen ? "ca-sidebar--open" : ""}`} style={s.sidebar}>
+      <aside className={`dsa-sidebar ${isOpen ? "dsa-sidebar--open" : ""}`} style={s.sidebar}>
         {/* Close button — mobile only */}
-        <button className="ca-close-btn" onClick={onClose} aria-label="Close menu">
+        <button className="dsa-close-btn" onClick={onClose} aria-label="Close menu">
           <FaTimes size={16} />
         </button>
 
@@ -81,27 +81,27 @@ export default function CASidebar({
           <span style={s.logoText}>SN Finance</span>
         </div>
 
-        {/* CA Badge */}
+        {/* DSA Badge */}
         <div style={s.caBadge}>
           <FaUserTie size={14} color="#fbbf24" />
-          <span style={s.caBadgeText}>CA Portal</span>
-        </div>-
+          <span style={s.caBadgeText}>DSA Portal</span>
+        </div>
 
         {/* Navigation */}
         <nav style={s.nav}>
-          <NavLink icon={<FaChartLine />} label="Dashboard" href="/ca/dashboard" />
-          <NavLink icon={<FaListAlt />} label="All Applications" href="/ca/loans" />
-          <NavLink icon={<FaPlusCircle />} label="New Application" href="/ca/apply" />
-          <NavLink icon={<FaUsers />} label="Manage CAs" href="/ca/manage-cas" />
-          <NavLink icon={<FaUserTie />} label="My Profile" href="/ca/profile" />
+          <NavLink icon={<FaChartLine />} label="Dashboard" href="/dsa/dashboard" />
+          <NavLink icon={<FaListAlt />} label="All Applications" href="/dsa/loans" />
+          <NavLink icon={<FaPlusCircle />} label="New Application" href="/dsa/apply" />
+          <NavLink icon={<FaUsers />} label="Manage DSAs" href="/dsa/manage-dsas" />
+          <NavLink icon={<FaUserTie />} label="My Profile" href="/dsa/profile" />
         </nav>
 
         {/* User */}
-        <div style={{ ...s.sidebarUser, cursor: "pointer" }} onClick={() => go("/ca/profile")}>
+        <div style={{ ...s.sidebarUser, cursor: "pointer" }} onClick={() => go("/dsa/profile")}>
           <div style={s.avatarCircle}>{userName.charAt(0).toUpperCase()}</div>
           <div style={s.userInfo}>
             <div style={s.userName}>{userName}</div>
-            <div style={s.userRole}>Chartered Accountant</div>
+            <div style={s.userRole}>Direct Selling Agent</div>
           </div>
         </div>
 
@@ -113,31 +113,40 @@ export default function CASidebar({
       </aside>
 
       <style jsx>{`
-        .ca-close-btn {
+        /* ── FIXED ON ALL SCREEN SIZES ──
+           Previously this only applied inside the mobile media query,
+           so on desktop the sidebar was a normal flex child and scrolled
+           away with the page once content grew taller than the viewport.
+           Now it's pinned to the viewport at every breakpoint. */
+        .dsa-sidebar {
+          position: fixed;
+          top: 0;
+          left: 0;
+          height: 100vh;
+          overflow-y: auto;
+          z-index: 60;
+          transition: transform 0.25s ease;
+        }
+
+        .dsa-close-btn {
           display: none;
         }
 
-        .ca-backdrop {
+        .dsa-backdrop {
           display: none;
         }
 
         @media (max-width: 900px) {
-          .ca-sidebar {
-            position: fixed !important;
-            top: 0;
-            left: 0;
-            height: 100vh !important;
-            z-index: 60;
+          .dsa-sidebar {
             transform: translateX(-100%);
-            transition: transform 0.25s ease;
             box-shadow: 4px 0 24px rgba(0, 0, 0, 0.25);
           }
 
-          .ca-sidebar--open {
+          .dsa-sidebar--open {
             transform: translateX(0);
           }
 
-          .ca-close-btn {
+          .dsa-close-btn {
             display: flex;
             align-items: center;
             justify-content: center;
@@ -153,7 +162,7 @@ export default function CASidebar({
             cursor: pointer;
           }
 
-          .ca-backdrop {
+          .dsa-backdrop {
             display: block;
             position: fixed;
             inset: 0;
@@ -164,7 +173,7 @@ export default function CASidebar({
             transition: opacity 0.2s ease;
           }
 
-          .ca-backdrop--visible {
+          .dsa-backdrop--visible {
             opacity: 1;
             pointer-events: auto;
           }

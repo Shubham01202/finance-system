@@ -25,9 +25,18 @@ export default function AuthPage() {
   const [newPassword, setNewPassword] = useState("");
   const [resetOtp, setResetOtp]       = useState("");
 
-  const [formData, setFormData] = useState({
+const [formData, setFormData] = useState({
     full_name: "", email: "", mobile: "", password: "", role: "",
   });
+
+  // ── all roles in system, "admin" excluded from public signup dropdown ──
+  const ALL_ROLES = [
+    { value: "customer", label: "Customer" },
+    { value: "ca",       label: "CA (Chartered Accountant)" },
+    { value: "dsa",      label: "DSA (Direct Selling Agent)" },
+    { value: "admin",    label: "Admin" },
+  ];
+  const signupRoles = ALL_ROLES.filter(r => r.value !== "admin");
 
   const fullNameRef = useRef<HTMLInputElement>(null);
   const mobileRef   = useRef<HTMLInputElement>(null);
@@ -84,7 +93,7 @@ export default function AuthPage() {
         setTimeout(() => {
           router.push("/admin/dashboard");
         }, 1000);
-      } else if (role === "ca") {
+} else if (role === "ca") {
         try {
           const profileRes = await axios.get(
             `${process.env.NEXT_PUBLIC_API_URL}/api/ca/profile`,
@@ -104,6 +113,26 @@ export default function AuthPage() {
             router.push("/ca/profile/setup");
           }, 1000);
         }
+      } else if (role === "dsa") {
+        try {
+          const profileRes = await axios.get(
+            `${process.env.NEXT_PUBLIC_API_URL}/api/dsa/profile`,
+            {
+              headers: { Authorization: `Bearer ${res.data.token}` },
+            }
+          );
+          const isComplete =
+            profileRes.data?.profile_completed ||
+            profileRes.data?.data?.profile_completed;
+
+          setTimeout(() => {
+            router.push(isComplete ? "/dsa/dashboard" : "/dsa/profile/setup");
+          }, 1000);
+        } catch {
+          setTimeout(() => {
+            router.push("/dsa/profile/setup");
+          }, 1000);
+        }
       } else {
         setTimeout(() => {
           router.push("/dashboard");
@@ -118,9 +147,21 @@ export default function AuthPage() {
 
   /* ══ SIGNUP (sends OTP, reveals inline OTP field — no screen change) ══ */
   const handleSignup = async () => {
-    if (!formData.full_name || !formData.email || !formData.mobile || !formData.password || !formData.role) {
-      msg("Please fill all fields including role.", true); return;
-    }
+   if (
+  !formData.full_name ||
+  !formData.email ||
+  !formData.mobile ||
+  !formData.password ||
+  !formData.role
+) {
+  msg("Please fill all fields including role.", true);
+  return;
+}
+
+if (!/^[6-9]\d{9}$/.test(formData.mobile)) {
+  msg("Enter a valid 10-digit mobile number.", true);
+  return;
+}
     setLoading(true); clearMsg();
     try {
       await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/signup`, formData);
@@ -343,20 +384,34 @@ export default function AuthPage() {
                 onKeyDown={e => handleKeyDown(e, mobileRef)}
                 disabled={showOtp}
               />
-              <input
-                ref={mobileRef} type="text" name="mobile"
-                placeholder="Mobile Number" className="input"
-                value={formData.mobile} onChange={handleChange}
-                onKeyDown={e => handleKeyDown(e, emailRef)}
-                disabled={showOtp}
-              />
-              <select
+             <input
+  ref={mobileRef}
+  type="text"
+  name="mobile"
+  placeholder="Mobile Number"
+  className="input"
+  value={formData.mobile}
+  onChange={(e) => {
+    const value = e.target.value.replace(/\D/g, ""); // only numbers
+
+    if (value.length <= 10) {
+      setFormData({
+        ...formData,
+        mobile: value,
+      });
+    }
+  }}
+  onKeyDown={(e) => handleKeyDown(e, emailRef)}
+  disabled={showOtp}
+/>
+            <select
                 name="role" value={formData.role} onChange={handleChange}
                 className="select" disabled={showOtp}
               >
                 <option value="">Select your role</option>
-                <option value="customer">Customer</option>
-                <option value="ca">CA (Chartered Accountant)</option>
+                {signupRoles.map(r => (
+                  <option key={r.value} value={r.value}>{r.label}</option>
+                ))}
               </select>
               <input
                 ref={emailRef} type="email" name="email"
