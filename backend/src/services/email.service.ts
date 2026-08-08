@@ -11,6 +11,7 @@ import { decrypt } from "../utils/crypto";
    transporter on the fly (no more hardcoded creds).
 ───────────────────────────────────────────── */
 const getTransporter = async () => {
+  console.log("[SMTP] ── Fetching active smtp_settings row from DB...");
   const result = await pool.query(
     `SELECT *
      FROM smtp_settings
@@ -19,38 +20,67 @@ const getTransporter = async () => {
   );
 
   if (result.rows.length === 0) {
+    console.error("[SMTP] ✗ No active smtp_settings row found in DB.");
     throw new Error("SMTP settings not configured.");
   }
 
   const smtp = result.rows[0];
   const port = Number(smtp.port);
 
-  // Port 465 = implicit TLS (secure: true)
-  // Port 587 / 25 = STARTTLS (secure: false, but still upgrades to TLS)
-  const secure = port === 465;
+  // encryption_type: 'ssl' -> port 465, implicit TLS (secure: true)
+  // encryption_type: 'tls' (or anything else, e.g. port 587) -> STARTTLS (secure: false)
+  const secure = smtp.encryption_type === "ssl";
+
+  console.log("[SMTP] Config resolved:", {
+    host: smtp.host,
+    port,
+    port_type: typeof smtp.port,
+    encryption_type: smtp.encryption_type,
+    secure_flag_used: secure,
+    requireTLS_used: !secure,
+    username: smtp.username,
+    password_present: Boolean(smtp.password_encrypted),
+    from_email: smtp.from_email,
+    from_name: smtp.from_name,
+  });
+
+  if (!smtp.host || Number.isNaN(port)) {
+    console.error("[SMTP] ✗ Invalid host or port in DB row.", {
+      host: smtp.host,
+      raw_port: smtp.port,
+    });
+    throw new Error(`Invalid SMTP host/port: host="${smtp.host}" port="${smtp.port}"`);
+  }
+
+  let decryptedPass: string;
+  try {
+    decryptedPass = decrypt(smtp.password_encrypted);
+    console.log("[SMTP] ✓ Password decrypted successfully (length:", decryptedPass?.length, ")");
+  } catch (err: any) {
+    console.error("[SMTP] ✗ Failed to decrypt password:", err?.message);
+    throw new Error("Failed to decrypt SMTP password: " + err?.message);
+  }
 
   const transporter = nodemailer.createTransport({
     host: smtp.host,
     port,
-    secure, // true only for 465 — this was likely your bug if using 587 with secure:true
+    secure, // true only for 465 (ssl) — false for 587 (tls/STARTTLS)
+    requireTLS: !secure, // force STARTTLS upgrade on 587
     auth: {
       user: smtp.username,
-      pass: decrypt(smtp.password_encrypted),
+      pass: decryptedPass,
     },
-    // STARTTLS still required for 587/25
-    requireTLS: !secure,
-    tls: {
-      // Only relax this if you're SURE the host cert is fine but resolves oddly;
-      // otherwise remove this line — it's a security downgrade.
-      // rejectUnauthorized: false,
-    },
-    // Fail fast instead of hanging until Render's platform timeout kills it
-    connectionTimeout: 10_000, // 10s to establish TCP connection
-    greetingTimeout: 10_000,   // 10s to receive SMTP greeting
-    socketTimeout: 20_000,     // 20s of inactivity on the socket
-    logger: true,   // logs SMTP conversation to console
-    debug: true,    // verbose debug output
-  });
+    family: 4, // force IPv4 — avoids hangs on broken/blocked IPv6 routes (common on Render)
+    connectionTimeout: 10_000, // fail fast instead of hanging until platform timeout
+    greetingTimeout: 10_000,
+    socketTimeout: 20_000,
+    logger: true, // logs full SMTP protocol conversation
+    debug: true, // verbose debug output from nodemailer/smtp-connection
+  } as any); // cast: installed @types/nodemailer doesn't declare `family`, which throws off overload resolution
+
+  console.log(
+    `[SMTP] Transporter created → ${smtp.host}:${port} (secure=${secure}, requireTLS=${!secure}, family=IPv4)`
+  );
 
   return {
     transporter,
@@ -65,12 +95,51 @@ const getTransporter = async () => {
    since at import-time there may be no active config yet.
 ───────────────────────────────────────────── */
 export async function verifySmtpConnection(): Promise<{ ok: boolean; error?: string }> {
+  const startedAt = Date.now();
+  console.log("[SMTP TEST] ── Starting SMTP connection verification...");
+
   try {
-    const { transporter } = await getTransporter();
+    const { transporter, smtp } = await getTransporter();
+
+    console.log(`[SMTP TEST] Attempting transporter.verify() against ${smtp.host}:${smtp.port} ...`);
     await transporter.verify();
+
+    const elapsed = Date.now() - startedAt;
+    console.log(`[SMTP TEST] ✓ SUCCESS — connection verified in ${elapsed}ms`);
     return { ok: true };
   } catch (error: any) {
-    console.log("SMTP ERROR:", error);
+    const elapsed = Date.now() - startedAt;
+
+    console.error("─────────────────────────────────────────────");
+    console.error("[SMTP TEST] ✗ FAILED after", elapsed, "ms");
+    console.error("[SMTP TEST] error.message :", error?.message);
+    console.error("[SMTP TEST] error.code    :", error?.code);
+    console.error("[SMTP TEST] error.command :", error?.command);
+    console.error("[SMTP TEST] error.errno   :", error?.errno);
+    console.error("[SMTP TEST] error.syscall :", error?.syscall);
+    console.error("[SMTP TEST] error.address :", error?.address);
+    console.error("[SMTP TEST] error.port    :", error?.port);
+    console.error(
+      "[SMTP TEST] full error object:",
+      JSON.stringify(error, Object.getOwnPropertyNames(error), 2)
+    );
+    console.error("─────────────────────────────────────────────");
+
+    let hint = "Unknown error — check the full error object above.";
+    if (error?.code === "ETIMEDOUT" && error?.command === "CONN") {
+      hint =
+        "TCP connection never established. This usually means the host/port is unreachable " +
+        "from this server's network (blocked outbound port, wrong IPv4/IPv6 route, or firewall) " +
+        "— not a credentials issue.";
+    } else if (error?.code === "EAUTH") {
+      hint = "Authentication rejected — check smtp.username and the decrypted password/SMTP key.";
+    } else if (error?.code === "ECONNREFUSED") {
+      hint = "Host actively refused the connection — likely wrong port or service not listening there.";
+    } else if (error?.code === "ESOCKET") {
+      hint = "TLS/socket-level error — check secure/requireTLS match the port (465=secure, 587=STARTTLS).";
+    }
+    console.error("[SMTP TEST] Hint:", hint);
+
     return { ok: false, error: error?.message || "SMTP verification failed" };
   }
 }
