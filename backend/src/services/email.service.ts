@@ -23,15 +23,33 @@ const getTransporter = async () => {
   }
 
   const smtp = result.rows[0];
+  const port = Number(smtp.port);
+
+  // Port 465 = implicit TLS (secure: true)
+  // Port 587 / 25 = STARTTLS (secure: false, but still upgrades to TLS)
+  const secure = port === 465;
 
   const transporter = nodemailer.createTransport({
     host: smtp.host,
-    port: Number(smtp.port),
-    secure: smtp.encryption_type === "ssl",
+    port,
+    secure, // true only for 465 — this was likely your bug if using 587 with secure:true
     auth: {
       user: smtp.username,
       pass: decrypt(smtp.password_encrypted),
     },
+    // STARTTLS still required for 587/25
+    requireTLS: !secure,
+    tls: {
+      // Only relax this if you're SURE the host cert is fine but resolves oddly;
+      // otherwise remove this line — it's a security downgrade.
+      // rejectUnauthorized: false,
+    },
+    // Fail fast instead of hanging until Render's platform timeout kills it
+    connectionTimeout: 10_000, // 10s to establish TCP connection
+    greetingTimeout: 10_000,   // 10s to receive SMTP greeting
+    socketTimeout: 20_000,     // 20s of inactivity on the socket
+    logger: true,   // logs SMTP conversation to console
+    debug: true,    // verbose debug output
   });
 
   return {
