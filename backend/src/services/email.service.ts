@@ -1,17 +1,43 @@
 // Path: backend/src/services/email.service.ts
+//
+// ─────────────────────────────────────────────────────────────
+// NOTE ON THIS REWRITE:
+// This file now sends email via Brevo's HTTP Transactional Email
+// API (https://api.brevo.com/v3/smtp/email) instead of raw SMTP.
+// Reason: Render's free-tier plans block outbound traffic on SMTP
+// ports 25/465/587 entirely. The API runs over standard HTTPS
+// (port 443), which is never blocked.
+//
+// CREDENTIAL CHANGE: you need a Brevo *API key* now (starts with
+// "xkeysib-..."), NOT the SMTP key you used before. Generate one at:
+// Brevo Dashboard → Settings → SMTP & API → API Keys tab
+// (different tab from the SMTP tab you used previously)
+//
+// To avoid a DB migration, this reuses the existing
+// `password_encrypted` column on smtp_settings to store the
+// (encrypted) API key. `host`, `port`, `username`, `encryption_type`
+// are no longer used but the columns are left as-is.
+// ─────────────────────────────────────────────────────────────
 
-import nodemailer from "nodemailer";
+import fs from "fs";
 import { pool } from "../config/db";
 import { decrypt } from "../utils/crypto";
 
+const BREVO_API_URL = "https://api.brevo.com/v3/smtp/email";
+const BREVO_ACCOUNT_URL = "https://api.brevo.com/v3/account";
+
 /* ─────────────────────────────────────────────
-   GET ACTIVE SMTP TRANSPORTER
-   Fetches the active smtp_settings row from DB,
-   decrypts the password, and builds a nodemailer
-   transporter on the fly (no more hardcoded creds).
+   GET ACTIVE BREVO CONFIG
+   Fetches the active smtp_settings row, decrypts the
+   stored API key, and extracts a clean sender email
+   (in case from_email is stored as "Name <email>").
 ───────────────────────────────────────────── */
-export const getTransporter = async () => {
-  console.log("[SMTP] ── Fetching active smtp_settings row from DB...");
+async function getBrevoConfig(): Promise<{
+  apiKey: string;
+  fromEmail: string;
+  fromName: string;
+}> {
+  console.log("[BREVO] ── Fetching active smtp_settings row from DB...");
   const result = await pool.query(
     `SELECT *
      FROM smtp_settings
@@ -20,128 +46,144 @@ export const getTransporter = async () => {
   );
 
   if (result.rows.length === 0) {
-    console.error("[SMTP] ✗ No active smtp_settings row found in DB.");
-    throw new Error("SMTP settings not configured.");
+    console.error("[BREVO] ✗ No active smtp_settings row found in DB.");
+    throw new Error("Email settings not configured.");
   }
 
-  const smtp = result.rows[0];
-  const port = Number(smtp.port);
+  const row = result.rows[0];
 
-  // encryption_type: 'ssl' -> port 465, implicit TLS (secure: true)
-  // encryption_type: 'tls' (or anything else, e.g. port 587) -> STARTTLS (secure: false)
-  const secure = smtp.encryption_type === "ssl";
+  let apiKey: string;
+  try {
+    apiKey = decrypt(row.password_encrypted);
+  } catch (err: any) {
+    console.error("[BREVO] ✗ Failed to decrypt API key:", err?.message);
+    throw new Error("Failed to decrypt Brevo API key: " + err?.message);
+  }
 
-  console.log("[SMTP] Config resolved:", {
-    host: smtp.host,
-    port,
-    port_type: typeof smtp.port,
-    encryption_type: smtp.encryption_type,
-    secure_flag_used: secure,
-    requireTLS_used: !secure,
-    username: smtp.username,
-    password_present: Boolean(smtp.password_encrypted),
-    from_email: smtp.from_email,
-    from_name: smtp.from_name,
+  if (!apiKey || !apiKey.startsWith("xkeysib-")) {
+    console.warn(
+      "[BREVO] ⚠ Stored credential does not look like a Brevo API key " +
+      "(expected it to start with 'xkeysib-'). Did you paste the SMTP key by mistake?"
+    );
+  }
+
+  // from_email may be stored either as a bare address or as "Name <email>" —
+  // Brevo's API wants sender.email as a bare address, so extract it.
+  const rawFromEmail: string = row.from_email || "";
+  const match = rawFromEmail.match(/<([^>]+)>/);
+  const fromEmail = match ? match[1] : rawFromEmail.trim();
+  const fromName = row.from_name || "SN Finance Service";
+
+  console.log("[BREVO] Config resolved:", {
+    fromEmail,
+    fromName,
+    api_key_present: Boolean(apiKey),
+    api_key_looks_valid: apiKey?.startsWith("xkeysib-"),
   });
 
-  if (!smtp.host || Number.isNaN(port)) {
-    console.error("[SMTP] ✗ Invalid host or port in DB row.", {
-      host: smtp.host,
-      raw_port: smtp.port,
-    });
-    throw new Error(`Invalid SMTP host/port: host="${smtp.host}" port="${smtp.port}"`);
-  }
-
-  let decryptedPass: string;
-  try {
-    decryptedPass = decrypt(smtp.password_encrypted);
-    console.log("[SMTP] ✓ Password decrypted successfully (length:", decryptedPass?.length, ")");
-  } catch (err: any) {
-    console.error("[SMTP] ✗ Failed to decrypt password:", err?.message);
-    throw new Error("Failed to decrypt SMTP password: " + err?.message);
-  }
-
-  const transporter = nodemailer.createTransport({
-    host: smtp.host,
-    port,
-    secure, // true only for 465 (ssl) — false for 587 (tls/STARTTLS)
-    requireTLS: !secure, // force STARTTLS upgrade on 587
-    auth: {
-      user: smtp.username,
-      pass: decryptedPass,
-    },
-    family: 4, // force IPv4 — avoids hangs on broken/blocked IPv6 routes (common on Render)
-    connectionTimeout: 10_000, // fail fast instead of hanging until platform timeout
-    greetingTimeout: 10_000,
-    socketTimeout: 20_000,
-    logger: true, // logs full SMTP protocol conversation
-    debug: true, // verbose debug output from nodemailer/smtp-connection
-  } as any); // cast: installed @types/nodemailer doesn't declare `family`, which throws off overload resolution
-
-  console.log(
-    `[SMTP] Transporter created → ${smtp.host}:${port} (secure=${secure}, requireTLS=${!secure}, family=IPv4)`
-  );
-
-  return {
-    transporter,
-    smtp,
-  };
-};
+  return { apiKey, fromEmail, fromName };
+}
 
 /* ─────────────────────────────────────────────
-   OPTIONAL: verify the active SMTP connection.
-   Call this manually (e.g. from a "Test Connection"
-   route/button) instead of running it at module load,
-   since at import-time there may be no active config yet.
+   VERIFY BREVO API KEY
+   Calls Brevo's /account endpoint — a lightweight way to
+   confirm the API key is valid without sending an email.
+   Use this from a "Test Connection" route/button.
 ───────────────────────────────────────────── */
 export async function verifySmtpConnection(): Promise<{ ok: boolean; error?: string }> {
   const startedAt = Date.now();
-  console.log("[SMTP TEST] ── Starting SMTP connection verification...");
+  console.log("[BREVO TEST] ── Verifying Brevo API key...");
 
   try {
-    const { transporter, smtp } = await getTransporter();
+    const { apiKey } = await getBrevoConfig();
 
-    console.log(`[SMTP TEST] Attempting transporter.verify() against ${smtp.host}:${smtp.port} ...`);
-    await transporter.verify();
+    const res = await fetch(BREVO_ACCOUNT_URL, {
+      method: "GET",
+      headers: {
+        accept: "application/json",
+        "api-key": apiKey,
+      },
+    });
 
     const elapsed = Date.now() - startedAt;
-    console.log(`[SMTP TEST] ✓ SUCCESS — connection verified in ${elapsed}ms`);
+
+    if (!res.ok) {
+      const body = await res.text();
+      console.error("[BREVO TEST] ✗ FAILED after", elapsed, "ms — status:", res.status, body);
+      return { ok: false, error: `Brevo API rejected the key (HTTP ${res.status}): ${body}` };
+    }
+
+    const data = await res.json();
+    console.log(`[BREVO TEST] ✓ SUCCESS in ${elapsed}ms — account: ${data?.email || "unknown"}`);
     return { ok: true };
   } catch (error: any) {
     const elapsed = Date.now() - startedAt;
-
-    console.error("─────────────────────────────────────────────");
-    console.error("[SMTP TEST] ✗ FAILED after", elapsed, "ms");
-    console.error("[SMTP TEST] error.message :", error?.message);
-    console.error("[SMTP TEST] error.code    :", error?.code);
-    console.error("[SMTP TEST] error.command :", error?.command);
-    console.error("[SMTP TEST] error.errno   :", error?.errno);
-    console.error("[SMTP TEST] error.syscall :", error?.syscall);
-    console.error("[SMTP TEST] error.address :", error?.address);
-    console.error("[SMTP TEST] error.port    :", error?.port);
-    console.error(
-      "[SMTP TEST] full error object:",
-      JSON.stringify(error, Object.getOwnPropertyNames(error), 2)
-    );
-    console.error("─────────────────────────────────────────────");
-
-    let hint = "Unknown error — check the full error object above.";
-    if (error?.code === "ETIMEDOUT" && error?.command === "CONN") {
-      hint =
-        "TCP connection never established. This usually means the host/port is unreachable " +
-        "from this server's network (blocked outbound port, wrong IPv4/IPv6 route, or firewall) " +
-        "— not a credentials issue.";
-    } else if (error?.code === "EAUTH") {
-      hint = "Authentication rejected — check smtp.username and the decrypted password/SMTP key.";
-    } else if (error?.code === "ECONNREFUSED") {
-      hint = "Host actively refused the connection — likely wrong port or service not listening there.";
-    } else if (error?.code === "ESOCKET") {
-      hint = "TLS/socket-level error — check secure/requireTLS match the port (465=secure, 587=STARTTLS).";
-    }
-    console.error("[SMTP TEST] Hint:", hint);
-
-    return { ok: false, error: error?.message || "SMTP verification failed" };
+    console.error("[BREVO TEST] ✗ FAILED after", elapsed, "ms —", error?.message);
+    return { ok: false, error: error?.message || "Brevo API verification failed" };
   }
+}
+
+/* ─────────────────────────────────────────────
+   CORE SEND FUNCTION
+   Every email in this file goes through here. Wraps
+   Brevo's HTTP API with the same attachment shape the
+   rest of the app already uses: { filename, content?, path? }
+───────────────────────────────────────────── */
+interface SendEmailArgs {
+  to: string;
+  subject: string;
+  html: string;
+  attachments?: { filename: string; content?: Buffer; path?: string }[];
+}
+
+async function sendBrevoEmail({ to, subject, html, attachments }: SendEmailArgs): Promise<void> {
+  const { apiKey, fromEmail, fromName } = await getBrevoConfig();
+
+  const brevoAttachments = attachments?.length
+    ? attachments.map((a) => {
+        let base64Content: string;
+        if (a.content) {
+          base64Content = a.content.toString("base64");
+        } else if (a.path) {
+          base64Content = fs.readFileSync(a.path).toString("base64");
+        } else {
+          throw new Error(`Attachment "${a.filename}" has neither content nor path.`);
+        }
+        return { name: a.filename, content: base64Content };
+      })
+    : undefined;
+
+  const payload: Record<string, any> = {
+    sender: { name: fromName, email: fromEmail },
+    to: [{ email: to }],
+    subject,
+    htmlContent: html,
+  };
+  if (brevoAttachments) payload.attachment = brevoAttachments;
+
+  console.log(`[BREVO] ── Sending email to ${to} — subject: "${subject}"`);
+  const startedAt = Date.now();
+
+  const res = await fetch(BREVO_API_URL, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "api-key": apiKey,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const elapsed = Date.now() - startedAt;
+
+  if (!res.ok) {
+    const body = await res.text();
+    console.error(`[BREVO] ✗ FAILED after ${elapsed}ms — HTTP ${res.status}:`, body);
+    throw new Error(`Brevo API error (HTTP ${res.status}): ${body}`);
+  }
+
+  const data = await res.json();
+  console.log(`[BREVO] ✓ SUCCESS in ${elapsed}ms — messageId: ${data?.messageId}`);
 }
 
 /* ─────────────────────────────────────────────
@@ -465,10 +507,8 @@ export async function sendOtpEmail(
   resetLink?: string
 ): Promise<void> {
   const isReset = Boolean(resetLink);
-  const { transporter, smtp } = await getTransporter();
 
-  await transporter.sendMail({
-    from: `"${smtp.from_name}" <${smtp.from_email}>`,
+  await sendBrevoEmail({
     to: toEmail,
     subject: isReset
       ? "Reset your SN Finance Service password"
@@ -485,10 +525,7 @@ export async function sendSetupPasswordEmail(
   fullName: string,
   setupLink: string
 ): Promise<void> {
-  const { transporter, smtp } = await getTransporter();
-
-  await transporter.sendMail({
-    from: `"${smtp.from_name}" <${smtp.from_email}>`,
+  await sendBrevoEmail({
     to: toEmail,
     subject: "Set Your Password - SN Finance Service",
     html: setupPasswordTemplate(fullName, setupLink),
@@ -503,10 +540,7 @@ export async function sendWelcomeEmail(
   fullName: string,
   role: string
 ): Promise<void> {
-  const { transporter, smtp } = await getTransporter();
-
-  await transporter.sendMail({
-    from: `"${smtp.from_name}" <${smtp.from_email}>`,
+  await sendBrevoEmail({
     to: toEmail,
     subject: `Welcome to SN Finance Service, ${fullName}! 🎉`,
     html: welcomeEmailTemplate(fullName, role),
@@ -717,13 +751,27 @@ export async function sendApplicationToBankerEmail(
   documentNames: string[],
   attachments: { filename: string; content?: Buffer; path?: string }[]
 ): Promise<void> {
-  const { transporter, smtp } = await getTransporter();
-
-  await transporter.sendMail({
-    from: `"${smtp.from_name}" <${smtp.from_email}>`,
+  await sendBrevoEmail({
     to: toEmail,
     subject,
     html: applicationToBankerTemplate(application, documentNames),
     attachments,
+  });
+}
+
+/* ─────────────────────────────────────────────
+   SEND A RAW/AD-HOC EMAIL (used by the "Test Connection" route)
+───────────────────────────────────────────── */
+export async function sendTestEmail(toEmail: string): Promise<void> {
+  await sendBrevoEmail({
+    to: toEmail,
+    subject: "SMTP Test Email",
+    html: `
+      <div style="font-family:Arial,sans-serif">
+        <h2>Email Configuration Successful ✅</h2>
+        <p>This is a test email from <b>SN Finance</b>.</p>
+        <p>Your Brevo API settings are working correctly.</p>
+      </div>
+    `,
   });
 }

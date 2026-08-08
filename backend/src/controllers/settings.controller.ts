@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { pool } from "../config/db";
-import { encrypt, decrypt } from "../utils/crypto";
-import { getTransporter } from "../services/email.service"; // ← reuse the single, fixed transporter builder
+import { encrypt } from "../utils/crypto";
+import { sendTestEmail, verifySmtpConnection } from "../services/email.service"; // ← now backed by Brevo's HTTP API
 
 /**
  * GET SMTP SETTINGS
@@ -151,10 +151,9 @@ export const updateSMTPSettings = async (req: Request, res: Response) => {
 
 /**
  * TEST SMTP CONNECTION (sends a real test email)
- * Now reuses the shared getTransporter() from email.service.ts —
- * same secure/requireTLS logic, IPv4 forcing, timeouts, and logging
- * as every other outgoing email in the app. No more duplicated,
- * out-of-sync transporter config.
+ * Now backed by Brevo's HTTP Transactional Email API — goes over
+ * HTTPS (443), so it works even on Render's free tier where outbound
+ * SMTP ports 25/465/587 are blocked.
  */
 export const testSMTPConnection = async (req: Request, res: Response) => {
   const startedAt = Date.now();
@@ -169,22 +168,9 @@ export const testSMTPConnection = async (req: Request, res: Response) => {
       });
     }
 
-    console.log(`[SMTP TEST ROUTE] ── Sending test email to ${email} ...`);
+    console.log(`[SMTP TEST ROUTE] ── Sending test email to ${email} via Brevo API...`);
 
-    const { transporter, smtp } = await getTransporter();
-
-    await transporter.sendMail({
-      from: `"${smtp.from_name}" <${smtp.from_email}>`,
-      to: email,
-      subject: "SMTP Test Email",
-      html: `
-        <div style="font-family:Arial,sans-serif">
-          <h2>SMTP Configuration Successful ✅</h2>
-          <p>This is a test email from <b>SN Finance</b>.</p>
-          <p>Your SMTP settings are working correctly.</p>
-        </div>
-      `,
-    });
+    await sendTestEmail(email);
 
     const elapsed = Date.now() - startedAt;
     console.log(`[SMTP TEST ROUTE] ✓ SUCCESS — test email sent in ${elapsed}ms`);
@@ -195,34 +181,20 @@ export const testSMTPConnection = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     const elapsed = Date.now() - startedAt;
-
-    console.error("─────────────────────────────────────────────");
-    console.error("[SMTP TEST ROUTE] ✗ FAILED after", elapsed, "ms");
-    console.error("[SMTP TEST ROUTE] error.message :", error?.message);
-    console.error("[SMTP TEST ROUTE] error.code    :", error?.code);
-    console.error("[SMTP TEST ROUTE] error.command :", error?.command);
-    console.error(
-      "[SMTP TEST ROUTE] full error object:",
-      JSON.stringify(error, Object.getOwnPropertyNames(error), 2)
-    );
-    console.error("─────────────────────────────────────────────");
-
-    let hint = "Unknown error — check the full error object above.";
-    if (error?.code === "ETIMEDOUT" && error?.command === "CONN") {
-      hint =
-        "TCP connection never established — host/port unreachable from this server's network " +
-        "(e.g. Render free-tier plans block outbound SMTP ports 25/465/587 entirely; " +
-        "upgrade to a paid instance type to lift this restriction). Not a credentials issue.";
-    } else if (error?.code === "EAUTH") {
-      hint = "Authentication rejected — check smtp.username and the decrypted password/SMTP key.";
-    } else if (error?.code === "ECONNREFUSED") {
-      hint = "Host actively refused the connection — likely wrong port or service not listening there.";
-    }
-    console.error("[SMTP TEST ROUTE] Hint:", hint);
+    console.error("[SMTP TEST ROUTE] ✗ FAILED after", elapsed, "ms —", error?.message);
 
     return res.status(500).json({
       success: false,
       message: error.message,
     });
   }
+};
+
+/**
+ * VERIFY CONNECTION ONLY (no email sent) — checks the Brevo API key
+ * is valid via Brevo's lightweight /account endpoint.
+ */
+export const verifyEmailConnection = async (req: Request, res: Response) => {
+  const result = await verifySmtpConnection();
+  return res.status(result.ok ? 200 : 500).json(result);
 };
