@@ -211,7 +211,7 @@ export default function DSAEditPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  // Resolve the selected loan service — stored value may be a name/slug OR a raw id.
+ // Resolve the selected loan service — stored value may be a name/slug OR a raw id.
   const selectedLoanService = loanServices.find(ls => {
     if (String(ls.id) === formData.loan_service) return true;
     if (ls.name === formData.loan_service) return true;
@@ -219,7 +219,14 @@ export default function DSAEditPage() {
     return false;
   });
 
-  useEffect(() => {
+  const selectedEmploymentType = employmentTypes.find(et => {
+    if (String(et.id) === formData.employment_type) return true;
+    if (et.name === formData.employment_type) return true;
+    if (slugify(et.name) === slugify(formData.employment_type)) return true;
+    return false;
+  });
+
+useEffect(() => {
     setTenureOptions([]);
     setDocumentTypes([]);
     if (!selectedLoanService) return;
@@ -232,12 +239,15 @@ export default function DSAEditPage() {
       .finally(() => setTenuresLoading(false));
 
     setDocumentsLoading(true);
-    fetch(`${CATALOG_API}/document-types?loan_service_id=${selectedLoanService.id}`)
+    const empParam = selectedEmploymentType
+      ? `&employment_type_id=${selectedEmploymentType.id}`
+      : "";
+    fetch(`${CATALOG_API}/document-types?loan_service_id=${selectedLoanService.id}${empParam}`)
       .then(r => r.json())
       .then(d => { if (d.success) setDocumentTypes(d.data); })
       .catch(() => {})
       .finally(() => setDocumentsLoading(false));
-  }, [selectedLoanService?.id]);
+  }, [selectedLoanService?.id, selectedEmploymentType?.id]);
 
   const fetchApplication = async (token: string) => {
     try {

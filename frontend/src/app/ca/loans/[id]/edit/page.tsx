@@ -219,6 +219,13 @@ const [userName, setUserName] = useState("CA");
     return false;
   });
 
+  const selectedEmploymentType = employmentTypes.find(et => {
+    if (String(et.id) === formData.employment_type) return true;
+    if (et.name === formData.employment_type) return true;
+    if (slugify(et.name) === slugify(formData.employment_type)) return true;
+    return false;
+  });
+
   useEffect(() => {
     setTenureOptions([]);
     setDocumentTypes([]);
@@ -232,12 +239,15 @@ const [userName, setUserName] = useState("CA");
       .finally(() => setTenuresLoading(false));
 
     setDocumentsLoading(true);
-    fetch(`${CATALOG_API}/document-types?loan_service_id=${selectedLoanService.id}`)
+    const empParam = selectedEmploymentType
+      ? `&employment_type_id=${selectedEmploymentType.id}`
+      : "";
+    fetch(`${CATALOG_API}/document-types?loan_service_id=${selectedLoanService.id}${empParam}`)
       .then(r => r.json())
       .then(d => { if (d.success) setDocumentTypes(d.data); })
       .catch(() => {})
       .finally(() => setDocumentsLoading(false));
-  }, [selectedLoanService?.id]);
+  }, [selectedLoanService?.id, selectedEmploymentType?.id]);
 
   const fetchApplication = async (token: string) => {
     try {

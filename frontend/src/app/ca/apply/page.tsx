@@ -150,15 +150,21 @@ export default function CAApplyPage() {
       .finally(() => setTenuresLoading(false));
 
     setDocumentsLoading(true);
-    fetch(`${CATALOG_API}/document-types?loan_service_id=${formData.loan_service}`)
+    const empParam = formData.employment_type
+      ? `&employment_type_id=${formData.employment_type}`
+      : "";
+    fetch(`${CATALOG_API}/document-types?loan_service_id=${formData.loan_service}${empParam}`)
       .then(r => r.json())
       .then(d => { if (d.success) setDocumentTypes(d.data); })
       .catch(() => {})
       .finally(() => setDocumentsLoading(false));
-  }, [formData.loan_service]);
+  }, [formData.loan_service, formData.employment_type]);
 
-  const selectedLoanServiceName =
+ const selectedLoanServiceName =
     loanServices.find(ls => String(ls.id) === formData.loan_service)?.name || "";
+
+  const selectedEmploymentTypeName =
+    employmentTypes.find(et => String(et.id) === formData.employment_type)?.name || "";
 
   /* ── VALIDATORS ── */
   const validators: Partial<Record<keyof FormData, (v: string) => string>> = {
@@ -280,6 +286,8 @@ const documentMeta: Record<string, { name: string; uploadedAt: string; dataUrl: 
           loan_service: selectedLoanServiceName,
           loan_type: selectedLoanServiceName,
           loan_service_id: formData.loan_service,
+          employment_type: selectedEmploymentTypeName,
+          employment_type_id: formData.employment_type,
           documents: documentMeta,
         }),
       });
@@ -406,7 +414,7 @@ const documentMeta: Record<string, { name: string; uploadedAt: string; dataUrl: 
                     <SelectEl ref={setRef(4)} name="employment_type" value={formData.employment_type} onChange={handleChange}>
                       <option value="">Select type</option>
                       {employmentTypes.map(et => (
-                        <option key={et.id} value={et.name}>{et.name}</option>
+                        <option key={et.id} value={et.id}>{et.name}</option>
                       ))}
                     </SelectEl>
                   </Field>

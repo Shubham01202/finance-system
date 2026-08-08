@@ -19,6 +19,8 @@ import {
   FaHandHoldingUsd,
   FaCalendarAlt,
   FaUserShield,
+  FaCog,
+  FaEnvelope,
 } from "react-icons/fa";
 
 type Props = {
@@ -45,6 +47,14 @@ const serviceModuleItems = [
   { icon: FaUserShield, label: "Roles", href: "/admin/service-module/role" },
 ];
 
+const settingsItems = [
+  {
+    icon: FaEnvelope,
+    label: "SMTP Settings",
+    href: "/admin/settings/smtp",
+  },
+];
+
 export default function AdminSidebar({
   adminName,
   handleLogout,
@@ -55,7 +65,14 @@ export default function AdminSidebar({
   const pathname = usePathname();
 
   const isServiceModuleRoute = pathname?.startsWith("/admin/service-module");
+    const isSettingsRoute = pathname?.startsWith("/admin/settings");
+
   const [serviceModuleOpen, setServiceModuleOpen] = useState(isServiceModuleRoute ?? false);
+  const [settingsOpen, setSettingsOpen] = useState(
+  isSettingsRoute ?? false
+);
+
+
 
   const go = (href: string) => {
     router.push(href);
@@ -143,6 +160,73 @@ export default function AdminSidebar({
             </div>
           </div>
         </div>
+
+        {/* Settings Module */}
+<div>
+  <button
+    onClick={() => setSettingsOpen((prev) => !prev)}
+    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold transition-colors text-left
+    ${
+      isSettingsRoute
+        ? "bg-white text-[#1e3a5f]"
+        : "text-white/70 hover:bg-white/10 hover:text-white"
+    }`}
+  >
+    <FaCog
+      size={15}
+      className={
+        isSettingsRoute ? "text-[#1e3a5f]" : "text-white/60"
+      }
+    />
+
+    <span className="flex-1">Settings</span>
+
+    <FaChevronDown
+      size={11}
+      className={`transition-transform duration-200 ${
+        settingsOpen ? "rotate-180" : ""
+      } ${
+        isSettingsRoute ? "text-[#1e3a5f]" : "text-white/50"
+      }`}
+    />
+  </button>
+
+  <div
+    className={`overflow-hidden transition-all duration-300 ease-in-out ${
+      settingsOpen
+        ? "max-h-96 opacity-100 mt-1"
+        : "max-h-0 opacity-0"
+    }`}
+  >
+    <div className="flex flex-col gap-1 pl-3 border-l border-white/10 ml-4">
+      {settingsItems.map((sub) => {
+        const active = pathname === sub.href;
+
+        return (
+          <button
+            key={sub.href}
+            onClick={() => go(sub.href)}
+            className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium transition-colors text-left
+            ${
+              active
+                ? "bg-white text-[#1e3a5f]"
+                : "text-white/60 hover:bg-white/10 hover:text-white"
+            }`}
+          >
+            <sub.icon
+              size={13}
+              className={
+                active ? "text-[#1e3a5f]" : "text-white/45"
+              }
+            />
+
+            <span>{sub.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  </div>
+</div>
       </nav>
 
       {/* Bottom user */}

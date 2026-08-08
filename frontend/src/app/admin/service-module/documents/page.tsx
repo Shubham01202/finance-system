@@ -21,10 +21,17 @@ interface LoanService {
   name: string;
 }
 
+interface EmploymentType {
+  id: number;
+  name: string;
+}
+
 interface DocumentType {
   id: number;
   loan_service_ids: number[];
   loan_service_names?: string[];
+  employment_type_ids: number[];        // NEW
+  employment_type_names?: string[];     // NEW
   document_name: string;
   is_required: boolean;
   is_active: boolean;
@@ -35,6 +42,7 @@ interface DocumentType {
 interface FormState {
   id: number | null;
   loan_service_ids: string[];
+  employment_type_ids: string[];        // NEW
   document_name: string;
   is_required: boolean;
   max_size_mb: string;
@@ -46,6 +54,7 @@ const FILE_TYPE_OPTIONS = ["pdf", "jpg", "jpeg", "png", "webp"];
 const emptyForm: FormState = {
   id: null,
   loan_service_ids: [],
+  employment_type_ids: [],              // NEW
   document_name: "",
   is_required: true,
   max_size_mb: "5",
@@ -65,6 +74,7 @@ export default function ManageDocumentsPage() {
 
   const [documents, setDocuments] = useState<DocumentType[]>([]);
   const [loanServices, setLoanServices] = useState<LoanService[]>([]);
+  const [employmentTypes, setEmploymentTypes] = useState<EmploymentType[]>([]); // NEW
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -94,19 +104,24 @@ export default function ManageDocumentsPage() {
   const fetchAll = async () => {
     try {
       setLoading(true);
-      const [docsRes, servicesRes] = await Promise.all([
+      const [docsRes, servicesRes, employmentRes] = await Promise.all([
         fetch(`${API}/api/admin/document-types`, {
           headers: { Authorization: `Bearer ${token()}` },
         }),
         fetch(`${API}/api/admin/loan-services`, {
           headers: { Authorization: `Bearer ${token()}` },
         }),
+        fetch(`${API}/api/admin/employment-types`, {          // NEW
+          headers: { Authorization: `Bearer ${token()}` },
+        }),
       ]);
       const docsData = await docsRes.json();
       const servicesData = await servicesRes.json();
+      const employmentData = await employmentRes.json();       // NEW
 
       if (docsData.success) setDocuments(docsData.data);
       if (servicesData.success) setLoanServices(servicesData.data);
+      if (employmentData.success) setEmploymentTypes(employmentData.data); // NEW
     } catch (err) {
       console.error("fetchAll error:", err);
       showMessage("error", "Failed to load documents.");
@@ -127,17 +142,18 @@ export default function ManageDocumentsPage() {
     setModalOpen(true);
   };
 
- const openEditModal = (doc: DocumentType) => {
-  setForm({
-    id: doc.id,
-    loan_service_ids: (doc.loan_service_ids || []).map(String),
-    document_name: doc.document_name,
-    is_required: doc.is_required,
-    max_size_mb: String(doc.max_size_mb),
-    allowed_file_types: doc.allowed_file_types || [],
-  });
-  setModalOpen(true);
-};
+  const openEditModal = (doc: DocumentType) => {
+    setForm({
+      id: doc.id,
+      loan_service_ids: (doc.loan_service_ids || []).map(String),
+      employment_type_ids: (doc.employment_type_ids || []).map(String), // NEW
+      document_name: doc.document_name,
+      is_required: doc.is_required,
+      max_size_mb: String(doc.max_size_mb),
+      allowed_file_types: doc.allowed_file_types || [],
+    });
+    setModalOpen(true);
+  };
 
   const closeModal = () => {
     if (saving) return;
@@ -154,20 +170,29 @@ export default function ManageDocumentsPage() {
   };
 
   const toggleLoanService = (id: number) => {
-  setForm((prev) => ({
-    ...prev,
-    loan_service_ids: prev.loan_service_ids.includes(String(id))
-      ? prev.loan_service_ids.filter((sid) => sid !== String(id))
-      : [...prev.loan_service_ids, String(id)],
-  }));
-};
+    setForm((prev) => ({
+      ...prev,
+      loan_service_ids: prev.loan_service_ids.includes(String(id))
+        ? prev.loan_service_ids.filter((sid) => sid !== String(id))
+        : [...prev.loan_service_ids, String(id)],
+    }));
+  };
+
+  const toggleEmploymentType = (id: number) => {          // NEW
+    setForm((prev) => ({
+      ...prev,
+      employment_type_ids: prev.employment_type_ids.includes(String(id))
+        ? prev.employment_type_ids.filter((eid) => eid !== String(id))
+        : [...prev.employment_type_ids, String(id)],
+    }));
+  };
 
   /* ── SAVE (create or update) ── */
-const handleSave = async () => {
-  if (form.loan_service_ids.length === 0 || !form.document_name.trim()) {
-    showMessage("error", "Select at least one loan service and enter a document name.");
-    return;
-  }
+  const handleSave = async () => {
+    if (form.loan_service_ids.length === 0 || !form.document_name.trim()) {
+      showMessage("error", "Select at least one loan service and enter a document name.");
+      return;
+    }
     if (form.allowed_file_types.length === 0) {
       showMessage("error", "Select at least one allowed file type.");
       return;
@@ -187,12 +212,13 @@ const handleSave = async () => {
           Authorization: `Bearer ${token()}`,
         },
         body: JSON.stringify({
-    loan_service_ids: form.loan_service_ids.map(Number),
-    document_name: form.document_name.trim(),
-    is_required: form.is_required,
-    max_size_mb: Number(form.max_size_mb),
-    allowed_file_types: form.allowed_file_types,
-  }),
+          loan_service_ids: form.loan_service_ids.map(Number),
+          employment_type_ids: form.employment_type_ids.map(Number), // NEW
+          document_name: form.document_name.trim(),
+          is_required: form.is_required,
+          max_size_mb: Number(form.max_size_mb),
+          allowed_file_types: form.allowed_file_types,
+        }),
       });
 
       const data = await res.json();
@@ -306,7 +332,7 @@ const handleSave = async () => {
           <div>
             <h1 className="text-xl sm:text-2xl font-extrabold text-slate-800 m-0">Manage Documents</h1>
             <p className="text-[13px] text-slate-400 mt-0.5">
-              Configure required documents per loan service — used on customer &amp; CA application forms
+              Configure required documents per loan service &amp; employment type — used on customer &amp; CA application forms
             </p>
           </div>
         </div>
@@ -350,6 +376,7 @@ const handleSave = async () => {
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200 text-left text-slate-500 text-[11px] uppercase tracking-wide font-bold">
                     <th className="px-4 py-3">Loan Service</th>
+                    <th className="px-4 py-3">Employment Type</th>
                     <th className="px-4 py-3">Document Name</th>
                     <th className="px-4 py-3">Required</th>
                     <th className="px-4 py-3">Max Size</th>
@@ -361,19 +388,32 @@ const handleSave = async () => {
                 <tbody>
                   {documents.map((doc) => (
                     <tr key={doc.id} className="border-b border-slate-100 hover:bg-slate-50/60">
-                    <td className="px-4 py-3 font-semibold text-slate-700">
-  <div className="flex flex-wrap gap-1">
-    {doc.loan_service_names && doc.loan_service_names.length > 0 ? (
-      doc.loan_service_names.map((n) => (
-        <span key={n} className="text-[10px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
-          {n}
-        </span>
-      ))
-    ) : (
-      <span className="text-slate-400">—</span>
-    )}
-  </div>
-</td>
+                      <td className="px-4 py-3 font-semibold text-slate-700">
+                        <div className="flex flex-wrap gap-1">
+                          {doc.loan_service_names && doc.loan_service_names.length > 0 ? (
+                            doc.loan_service_names.map((n) => (
+                              <span key={n} className="text-[10px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                                {n}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-1">
+                          {doc.employment_type_names && doc.employment_type_names.length > 0 ? (
+                            doc.employment_type_names.map((n) => (
+                              <span key={n} className="text-[10px] font-bold bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded">
+                                {n}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-[11px] text-slate-400">All</span>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-4 py-3 text-slate-800">{doc.document_name}</td>
                       <td className="px-4 py-3">
                         {doc.is_required ? (
@@ -445,28 +485,58 @@ const handleSave = async () => {
             </div>
 
             <div className="flex flex-col gap-4">
-            <div>
-  <label className="text-[13px] font-semibold text-slate-700 mb-1.5 block">Loan Services</label>
-  <div className="border border-slate-200 rounded-lg p-3 bg-slate-50 max-h-48 overflow-y-auto flex flex-col gap-2">
-    {loanServices.map((ls) => {
-      const checked = form.loan_service_ids.includes(String(ls.id));
-      return (
-        <label key={ls.id} className="flex items-center gap-2.5 cursor-pointer text-sm text-slate-700">
-          <input
-            type="checkbox"
-            checked={checked}
-            onChange={() => toggleLoanService(ls.id)}
-            className="w-4 h-4"
-          />
-          {ls.name}
-        </label>
-      );
-    })}
-  </div>
-  <p className="text-[11px] text-slate-400 mt-1.5">
-    Checked services will show this document on their application forms. Unchecked = hidden from that service.
-  </p>
-</div>
+              <div>
+                <label className="text-[13px] font-semibold text-slate-700 mb-1.5 block">Loan Services</label>
+                <div className="border border-slate-200 rounded-lg p-3 bg-slate-50 max-h-48 overflow-y-auto flex flex-col gap-2">
+                  {loanServices.map((ls) => {
+                    const checked = form.loan_service_ids.includes(String(ls.id));
+                    return (
+                      <label key={ls.id} className="flex items-center gap-2.5 cursor-pointer text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleLoanService(ls.id)}
+                          className="w-4 h-4"
+                        />
+                        {ls.name}
+                      </label>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1.5">
+                  Checked services will show this document on their application forms. Unchecked = hidden from that service.
+                </p>
+              </div>
+
+              {/* NEW: Employment Types checklist (same pattern as Loan Services) */}
+              <div>
+                <label className="text-[13px] font-semibold text-slate-700 mb-1.5 block">Employment Types</label>
+                <div className="border border-amber-200 rounded-lg p-3 bg-amber-50 max-h-48 overflow-y-auto flex flex-col gap-2">
+                  {employmentTypes.length === 0 ? (
+                    <p className="text-[12px] text-slate-400">No employment types found.</p>
+                  ) : (
+                    employmentTypes.map((et) => {
+                      const checked = form.employment_type_ids.includes(String(et.id));
+                      return (
+                        <label key={et.id} className="flex items-center gap-2.5 cursor-pointer text-sm text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleEmploymentType(et.id)}
+                            className="w-4 h-4"
+                          />
+                          {et.name}
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1.5">
+                  Leave unchecked to show this document to <strong>all</strong> employment types under the selected
+                  loan service. Check specific types (e.g. Salaried, Self-Employed) to restrict this document to
+                  only those applicants — it will show only when both the Loan Service and Employment Type match.
+                </p>
+              </div>
 
               <div>
                 <label className="text-[13px] font-semibold text-slate-700 mb-1.5 block">Document Name</label>

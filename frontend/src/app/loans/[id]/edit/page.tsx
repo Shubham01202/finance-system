@@ -238,10 +238,17 @@ export default function CustomerEditPage() {
 
 
 
-  const selectedLoanService = loanServices.find(ls => {
+ const selectedLoanService = loanServices.find(ls => {
     if (String(ls.id) === formData.loan_service) return true;
     if (ls.name === formData.loan_service) return true;
     if (slugify(ls.name) === slugify(formData.loan_service)) return true;
+    return false;
+  });
+
+  const selectedEmploymentType = employmentTypes.find(et => {
+    if (String(et.id) === formData.employment_type) return true;
+    if (et.name === formData.employment_type) return true;
+    if (slugify(et.name) === slugify(formData.employment_type)) return true;
     return false;
   });
 
@@ -268,7 +275,10 @@ export default function CustomerEditPage() {
       .finally(() => setTenuresLoading(false));
 
     setDocumentsLoading(true);
-    fetch(`${CATALOG_API}/document-types?loan_service_id=${selectedLoanService.id}`)
+    const empParam = selectedEmploymentType
+      ? `&employment_type_id=${selectedEmploymentType.id}`
+      : "";
+    fetch(`${CATALOG_API}/document-types?loan_service_id=${selectedLoanService.id}${empParam}`)
       .then(r => r.json())
       .then(d => {
         if (d.success) {
@@ -278,7 +288,7 @@ export default function CustomerEditPage() {
       })
       .catch(() => {})
       .finally(() => setDocumentsLoading(false));
-  }, [selectedLoanService?.id]);
+  }, [selectedLoanService?.id, selectedEmploymentType?.id]);
 
   useEffect(() => {
     return () => {

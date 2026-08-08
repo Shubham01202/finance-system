@@ -169,7 +169,7 @@ const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof FormData, st
   }, []);
 
   /* ── Load tenures + documents whenever the loan service changes ── */
-  useEffect(() => {
+ useEffect(() => {
     setDocuments({});
     setDocErrors({});
     setTenureOptions([]);
@@ -185,15 +185,21 @@ const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof FormData, st
       .finally(() => setTenuresLoading(false));
 
     setDocumentsLoading(true);
-    fetch(`${CATALOG_API}/document-types?loan_service_id=${formData.loan_service}`)
+    const empParam = formData.employment_type
+      ? `&employment_type_id=${formData.employment_type}`
+      : "";
+    fetch(`${CATALOG_API}/document-types?loan_service_id=${formData.loan_service}${empParam}`)
       .then(r => r.json())
       .then(d => { if (d.success) setDocumentTypes(d.data); })
       .catch(() => {})
       .finally(() => setDocumentsLoading(false));
-  }, [formData.loan_service]);
+  }, [formData.loan_service, formData.employment_type]);
 
-  const selectedLoanServiceName =
+ const selectedLoanServiceName =
     loanServices.find(ls => String(ls.id) === formData.loan_service)?.name || "";
+
+  const selectedEmploymentTypeName =
+    employmentTypes.find(et => String(et.id) === formData.employment_type)?.name || "";
 
   const validators: Partial<Record<keyof FormData, (v: string) => string>> = {
     full_name:     v => v.trim().length < 3 ? "Min 3 characters required" : "",
@@ -324,10 +330,12 @@ const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof FormData, st
  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/loan/apply`, {
   method: "POST",
   headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-  body: JSON.stringify({
+ body: JSON.stringify({
     ...formData,
-    loan_service: selectedLoanServiceName,   // ✅ send the readable name, not the raw id
-    loan_service_id: formData.loan_service,  // keep the id separately for relational lookups
+    loan_service: selectedLoanServiceName,
+    loan_service_id: formData.loan_service,
+    employment_type: selectedEmploymentTypeName,
+    employment_type_id: formData.employment_type,
     pan_number: formData.pan.toUpperCase(),
     aadhaar_number: formData.aadhaar,
     loan_type: selectedLoanServiceName,
@@ -457,9 +465,9 @@ const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof FormData, st
                <Field label="Employment Type" required error={fieldErrors.employment_type}>
                   <SelectEl ref={setRef(4)} name="employment_type" value={formData.employment_type} onChange={handleChange}>
                     <option value="">Select employment type</option>
-                    {employmentTypes.map(et => (
-                      <option key={et.id} value={et.name}>{et.name}</option>
-                    ))}
+                   {employmentTypes.map(et => (
+  <option key={et.id} value={et.id}>{et.name}</option>
+))}
                   </SelectEl>
                 </Field>
                 <Field label="Annual Income (₹)" required error={fieldErrors.annual_income}>
