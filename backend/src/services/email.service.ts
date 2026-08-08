@@ -10,7 +10,7 @@ import { decrypt } from "../utils/crypto";
    decrypts the password, and builds a nodemailer
    transporter on the fly (no more hardcoded creds).
 ───────────────────────────────────────────── */
-const getTransporter = async () => {
+export const getTransporter = async () => {
   console.log("[SMTP] ── Fetching active smtp_settings row from DB...");
   const result = await pool.query(
     `SELECT *

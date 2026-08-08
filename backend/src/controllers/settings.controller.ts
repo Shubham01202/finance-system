@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { pool } from "../config/db";
 import { encrypt, decrypt } from "../utils/crypto";
-import nodemailer from "nodemailer";
+import { getTransporter } from "../services/email.service"; // ← reuse the single, fixed transporter builder
 
 /**
  * GET SMTP SETTINGS
@@ -149,7 +149,16 @@ export const updateSMTPSettings = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * TEST SMTP CONNECTION (sends a real test email)
+ * Now reuses the shared getTransporter() from email.service.ts —
+ * same secure/requireTLS logic, IPv4 forcing, timeouts, and logging
+ * as every other outgoing email in the app. No more duplicated,
+ * out-of-sync transporter config.
+ */
 export const testSMTPConnection = async (req: Request, res: Response) => {
+  const startedAt = Date.now();
+
   try {
     const { email } = req.body;
 
@@ -160,28 +169,9 @@ export const testSMTPConnection = async (req: Request, res: Response) => {
       });
     }
 
-    const result = await pool.query(
-      `SELECT * FROM smtp_settings WHERE is_active=true LIMIT 1`
-    );
+    console.log(`[SMTP TEST ROUTE] ── Sending test email to ${email} ...`);
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "SMTP settings not found.",
-      });
-    }
-
-    const smtp = result.rows[0];
-
-    const transporter = nodemailer.createTransport({
-      host: smtp.host,
-      port: Number(smtp.port),
-      secure: smtp.encryption_type === "ssl",
-      auth: {
-        user: smtp.username,
-        pass: decrypt(smtp.password_encrypted),
-      },
-    });
+    const { transporter, smtp } = await getTransporter();
 
     await transporter.sendMail({
       from: `"${smtp.from_name}" <${smtp.from_email}>`,
@@ -196,12 +186,39 @@ export const testSMTPConnection = async (req: Request, res: Response) => {
       `,
     });
 
+    const elapsed = Date.now() - startedAt;
+    console.log(`[SMTP TEST ROUTE] ✓ SUCCESS — test email sent in ${elapsed}ms`);
+
     return res.json({
       success: true,
       message: "Test email sent successfully.",
     });
   } catch (error: any) {
-    console.error("SMTP TEST ERROR:", error);
+    const elapsed = Date.now() - startedAt;
+
+    console.error("─────────────────────────────────────────────");
+    console.error("[SMTP TEST ROUTE] ✗ FAILED after", elapsed, "ms");
+    console.error("[SMTP TEST ROUTE] error.message :", error?.message);
+    console.error("[SMTP TEST ROUTE] error.code    :", error?.code);
+    console.error("[SMTP TEST ROUTE] error.command :", error?.command);
+    console.error(
+      "[SMTP TEST ROUTE] full error object:",
+      JSON.stringify(error, Object.getOwnPropertyNames(error), 2)
+    );
+    console.error("─────────────────────────────────────────────");
+
+    let hint = "Unknown error — check the full error object above.";
+    if (error?.code === "ETIMEDOUT" && error?.command === "CONN") {
+      hint =
+        "TCP connection never established — host/port unreachable from this server's network " +
+        "(e.g. Render free-tier plans block outbound SMTP ports 25/465/587 entirely; " +
+        "upgrade to a paid instance type to lift this restriction). Not a credentials issue.";
+    } else if (error?.code === "EAUTH") {
+      hint = "Authentication rejected — check smtp.username and the decrypted password/SMTP key.";
+    } else if (error?.code === "ECONNREFUSED") {
+      hint = "Host actively refused the connection — likely wrong port or service not listening there.";
+    }
+    console.error("[SMTP TEST ROUTE] Hint:", hint);
 
     return res.status(500).json({
       success: false,
