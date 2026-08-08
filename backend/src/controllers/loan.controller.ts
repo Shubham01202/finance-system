@@ -238,9 +238,6 @@ export const updateApplication = async (req: AuthRequest, res: Response) => {
     const uploadedFiles = (req.files as Express.Multer.File[]) || [];
 
     uploadedFiles.forEach((file) => {
-      // Only accept files whose fieldname matches a known document slot
-      if (!DOC_KEYS.includes(file.fieldname)) return;
-
       mergedDocuments[file.fieldname] = {
         name: file.originalname,
         url: `/uploads/documents/${file.filename}`,

@@ -1,27 +1,61 @@
 // Path: backend/src/services/email.service.ts
 
 import nodemailer from "nodemailer";
+import { pool } from "../config/db";
+import { decrypt } from "../utils/crypto";
 
 /* ─────────────────────────────────────────────
-   TRANSPORTER
+   GET ACTIVE SMTP TRANSPORTER
+   Fetches the active smtp_settings row from DB,
+   decrypts the password, and builds a nodemailer
+   transporter on the fly (no more hardcoded creds).
 ───────────────────────────────────────────── */
-const transporter = nodemailer.createTransport({
-  host:   process.env.SMTP_HOST,
-  port:   Number(process.env.SMTP_PORT),
-  secure: false, // TLS on port 587
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
+const getTransporter = async () => {
+  const result = await pool.query(
+    `SELECT *
+     FROM smtp_settings
+     WHERE is_active = true
+     LIMIT 1`
+  );
 
-transporter.verify((error, success) => {
-  if (error) {
-    console.log("SMTP ERROR:", error);
-  } else {
-    console.log("SMTP SERVER READY");
+  if (result.rows.length === 0) {
+    throw new Error("SMTP settings not configured.");
   }
-});
+
+  const smtp = result.rows[0];
+
+  const transporter = nodemailer.createTransport({
+    host: smtp.host,
+    port: Number(smtp.port),
+    secure: smtp.encryption_type === "ssl",
+    auth: {
+      user: smtp.username,
+      pass: decrypt(smtp.password_encrypted),
+    },
+  });
+
+  return {
+    transporter,
+    smtp,
+  };
+};
+
+/* ─────────────────────────────────────────────
+   OPTIONAL: verify the active SMTP connection.
+   Call this manually (e.g. from a "Test Connection"
+   route/button) instead of running it at module load,
+   since at import-time there may be no active config yet.
+───────────────────────────────────────────── */
+export async function verifySmtpConnection(): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const { transporter } = await getTransporter();
+    await transporter.verify();
+    return { ok: true };
+  } catch (error: any) {
+    console.log("SMTP ERROR:", error);
+    return { ok: false, error: error?.message || "SMTP verification failed" };
+  }
+}
 
 /* ─────────────────────────────────────────────
    OTP EMAIL TEMPLATE
@@ -344,29 +378,33 @@ export async function sendOtpEmail(
   resetLink?: string
 ): Promise<void> {
   const isReset = Boolean(resetLink);
+  const { transporter, smtp } = await getTransporter();
+
   await transporter.sendMail({
-    from:    process.env.SMTP_FROM,
-    to:      toEmail,
+    from: `"${smtp.from_name}" <${smtp.from_email}>`,
+    to: toEmail,
     subject: isReset
       ? "Reset your SN Finance Service password"
       : `${otp} is your SN Finance Service verification code`,
-    html:    otpEmailTemplate(fullName, otp, role, resetLink),
+    html: otpEmailTemplate(fullName, otp, role, resetLink),
   });
 }
 
+/* ─────────────────────────────────────────────
+   SEND SETUP-PASSWORD EMAIL
+───────────────────────────────────────────── */
 export async function sendSetupPasswordEmail(
   toEmail: string,
   fullName: string,
   setupLink: string
 ): Promise<void> {
+  const { transporter, smtp } = await getTransporter();
+
   await transporter.sendMail({
-    from: process.env.SMTP_FROM,
+    from: `"${smtp.from_name}" <${smtp.from_email}>`,
     to: toEmail,
     subject: "Set Your Password - SN Finance Service",
-    html: setupPasswordTemplate(
-      fullName,
-      setupLink
-    ),
+    html: setupPasswordTemplate(fullName, setupLink),
   });
 }
 
@@ -378,11 +416,13 @@ export async function sendWelcomeEmail(
   fullName: string,
   role: string
 ): Promise<void> {
+  const { transporter, smtp } = await getTransporter();
+
   await transporter.sendMail({
-    from:    process.env.SMTP_FROM,
-    to:      toEmail,
+    from: `"${smtp.from_name}" <${smtp.from_email}>`,
+    to: toEmail,
     subject: `Welcome to SN Finance Service, ${fullName}! 🎉`,
-    html:    welcomeEmailTemplate(fullName, role),
+    html: welcomeEmailTemplate(fullName, role),
   });
 }
 
@@ -423,7 +463,7 @@ function applicationToBankerTemplate(application: any, documentNames: string[]):
   `;
 
   /* ── CORE (always shown) ── */
- let rows = [
+  let rows = [
     sectionHeaderRow("Application Info"),
     applicationDetailsRow("Application ID", application.application_number || application.id),
     applicationDetailsRow("Status", (application.status || "pending").toUpperCase()),
@@ -508,6 +548,7 @@ function applicationToBankerTemplate(application: any, documentNames: string[]):
   const docsListHtml = documentNames.length
     ? documentNames.map((n) => `<li style="margin-bottom:4px;">${n}</li>`).join("")
     : "<li>No documents attached</li>";
+
   return `
 <!DOCTYPE html>
 <html>
@@ -589,8 +630,10 @@ export async function sendApplicationToBankerEmail(
   documentNames: string[],
   attachments: { filename: string; content?: Buffer; path?: string }[]
 ): Promise<void> {
+  const { transporter, smtp } = await getTransporter();
+
   await transporter.sendMail({
-    from: process.env.SMTP_FROM,
+    from: `"${smtp.from_name}" <${smtp.from_email}>`,
     to: toEmail,
     subject,
     html: applicationToBankerTemplate(application, documentNames),

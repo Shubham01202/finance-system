@@ -11,6 +11,7 @@ import caRoutes   from "./routes/ca.routes";
 import serviceModuleRoutes from "./routes/serviceModule.routes";
 import publicCatalogRoutes from "./routes/publicCatalog.routes";
 import dsaRoutes from "./routes/dsa.routes";
+import settingsRoutes from "./routes/settings.routes";
 import { pool } from "./config/db";
 
 import adminRoutes from "./routes/admin.routes";
@@ -48,6 +49,7 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/admin", serviceModuleRoutes);
 app.use("/api/catalog", publicCatalogRoutes);
 app.use("/api/dsa", dsaRoutes);
+app.use("/api/admin/settings", settingsRoutes);
 
 
 
