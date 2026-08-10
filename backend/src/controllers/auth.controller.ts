@@ -27,7 +27,7 @@ export const signup = async (req: Request, res: Response) => {
       });
     }
 
-    const validRoles = ["customer", "ca"];
+   const validRoles = ["customer", "ca", "dsa"];
 
     if (!validRoles.includes(role)) {
       return res.status(400).json({
